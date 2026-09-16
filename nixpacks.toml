@@ -5,4 +5,4 @@ nixPkgs = ["python313", "python313Packages.pip", "python313Packages.virtualenv"]
 cmds = ["python3 -m venv /app/venv", "/app/venv/bin/pip install -r requirements.txt"]
 
 [start]
-cmd = "cd zynex_cartel && /app/venv/bin/python main.py"
+cmd = "PATH=/app/venv/bin:$PATH python zynex_cartel/main.py"

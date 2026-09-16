@@ -1,11 +1,8 @@
 [phases.setup]
-nixPkgs = ["python313", "python313Packages.pip"]
+nixPkgs = ["python313", "python313Packages.pip", "python313Packages.virtualenv"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
-
-[phases.build]
-cmds = []
+cmds = ["python3 -m venv /app/venv", "/app/venv/bin/pip install -r requirements.txt"]
 
 [start]
-cmd = "cd zynex_cartel && python main.py"
+cmd = "cd zynex_cartel && /app/venv/bin/python main.py"

@@ -7,6 +7,8 @@ import asyncio
 import logging
 import sys
 from telegram.ext import ApplicationBuilder, Application
+from telegram import Update
+from telegram.ext import ContextTypes
 
 from config import BOT_TOKEN, LOG_LEVEL, LOG_FILE
 from database import init_db, close_db
@@ -157,6 +159,20 @@ def main():
         await handle_membership_update(context.bot, update)
 
     app.add_handler(ChatMemberHandler(_membership_watcher, ChatMemberHandler.CHAT_MEMBER))
+
+    # Global error handler — log full traceback; never crash the poller
+    async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+        err_logger = logging.getLogger("zynex.errors")
+        if isinstance(context.error, Exception):
+            err_logger.exception(
+                "Unhandled exception while processing update %s",
+                getattr(update, "update_id", update),
+                exc_info=context.error,
+            )
+        else:
+            err_logger.error("Unhandled error: %s", context.error)
+
+    app.add_error_handler(_error_handler)
 
     logger.info("All handlers registered.")
     logger.info("ZYNEX CARTEL is now running!")

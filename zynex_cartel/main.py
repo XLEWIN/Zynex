@@ -45,6 +45,13 @@ async def post_init(app: Application):
     """Called after the application is initialized."""
     logger = logging.getLogger("zynex.main")
 
+    # Delete any active webhook before polling
+    try:
+        await app.bot.delete_webhook(drop_pending_updates=False)
+        logger.info("Webhook deleted successfully.")
+    except Exception as e:
+        logger.warning(f"Could not delete webhook: {e}")
+
     # Initialize database
     await init_db()
     logger.info("Database initialized.")

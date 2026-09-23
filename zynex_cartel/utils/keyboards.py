@@ -197,8 +197,8 @@ def active_giveaways_keyboard(giveaways: list[dict]) -> InlineKeyboardMarkup:
         gid = g["giveaway_id"]
         name = g["name"]
         gtype = g["type"]
-        from utils import giveaway_type_emoji
-        emoji = giveaway_type_emoji(gtype)
+        from utils import giveaway_type_emoji_plain
+        emoji = giveaway_type_emoji_plain(gtype)
         buttons.append([
             InlineKeyboardButton(
                 f"{emoji} {name}",

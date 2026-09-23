@@ -57,14 +57,18 @@ async def end_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     giveaway = await _get_active_giveaway(update, context)
     if not giveaway:
         await update.message.reply_text(
-            f"{E.INFO} No active giveaway found."
+            f"{E.INFO} No active giveaway found.",
+            parse_mode=ParseMode.HTML,
         )
         return
 
     gid = giveaway["giveaway_id"]
 
     if giveaway["status"] == GiveawayStatus.ENDED:
-        await update.message.reply_text(f"{E.INFO} This giveaway has already ended.")
+        await update.message.reply_text(
+            f"{E.INFO} This giveaway has already ended.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     # End the giveaway
@@ -92,27 +96,35 @@ async def winner_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_id = int(context.args[0])
     except ValueError:
         await update.message.reply_text(
-            f"{E.WARNING} Invalid user ID."
+            f"{E.WARNING} Invalid user ID.",
+            parse_mode=ParseMode.HTML,
         )
         return
 
     giveaway = await _get_active_giveaway(update, context)
     if not giveaway:
-        await update.message.reply_text(f"{E.INFO} No active giveaway found.")
+        await update.message.reply_text(
+            f"{E.INFO} No active giveaway found.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     gid = giveaway["giveaway_id"]
 
     # Check if target is banned
     if await is_banned(target_id):
-        await update.message.reply_text(f"{E.WARNING} User is banned.")
+        await update.message.reply_text(
+            f"{E.WARNING} User is banned.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     # Check winner count limit
     winners = await get_admin_winner_overrides(gid)
     if len(winners) >= giveaway["winner_count"]:
         await update.message.reply_text(
-            f"{E.WARNING} Winner count limit reached ({giveaway['winner_count']})."
+            f"{E.WARNING} Winner count limit reached ({giveaway['winner_count']}).",
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -159,16 +171,25 @@ async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text(f"{E.WARNING} Invalid user ID.")
+        await update.message.reply_text(
+            f"{E.WARNING} Invalid user ID.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     giveaway = await _get_active_giveaway(update, context)
     if not giveaway:
-        await update.message.reply_text(f"{E.INFO} No active giveaway found.")
+        await update.message.reply_text(
+            f"{E.INFO} No active giveaway found.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     if await is_banned(target_id):
-        await update.message.reply_text(f"{E.WARNING} User is banned.")
+        await update.message.reply_text(
+            f"{E.WARNING} User is banned.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     gid = giveaway["giveaway_id"]
@@ -187,7 +208,8 @@ async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await update.message.reply_text(
-            f"{E.INFO} User is already participating."
+            f"{E.INFO} User is already participating.",
+            parse_mode=ParseMode.HTML,
         )
 
 
@@ -204,12 +226,18 @@ async def remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text(f"{E.WARNING} Invalid user ID.")
+        await update.message.reply_text(
+            f"{E.WARNING} Invalid user ID.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     giveaway = await _get_active_giveaway(update, context)
     if not giveaway:
-        await update.message.reply_text(f"{E.INFO} No active giveaway found.")
+        await update.message.reply_text(
+            f"{E.INFO} No active giveaway found.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     gid = giveaway["giveaway_id"]
@@ -242,12 +270,18 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text(f"{E.WARNING} Invalid user ID.")
+        await update.message.reply_text(
+            f"{E.WARNING} Invalid user ID.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     # Don't ban the owner
     if target_id == OWNER_ID:
-        await update.message.reply_text(f"{E.WARNING} Cannot ban the bot owner.")
+        await update.message.reply_text(
+            f"{E.WARNING} Cannot ban the bot owner.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     admin_id = update.effective_user.id
@@ -283,7 +317,10 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text(f"{E.WARNING} Invalid user ID.")
+        await update.message.reply_text(
+            f"{E.WARNING} Invalid user ID.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     admin_id = update.effective_user.id
@@ -316,7 +353,10 @@ async def addsudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text(f"{E.WARNING} Invalid user ID.")
+        await update.message.reply_text(
+            f"{E.WARNING} Invalid user ID.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     admin_id = update.effective_user.id
@@ -349,7 +389,10 @@ async def removesudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         target_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text(f"{E.WARNING} Invalid user ID.")
+        await update.message.reply_text(
+            f"{E.WARNING} Invalid user ID.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     admin_id = update.effective_user.id
@@ -376,7 +419,10 @@ async def select_giveaway_command(update: Update, context: ContextTypes.DEFAULT_
     active = await get_all_active_giveaways()
 
     if not active:
-        await update.message.reply_text(f"{E.INFO} No active giveaways.")
+        await update.message.reply_text(
+            f"{E.INFO} No active giveaways.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     if not context.args:
@@ -390,12 +436,18 @@ async def select_giveaway_command(update: Update, context: ContextTypes.DEFAULT_
     try:
         gid = int(context.args[0])
     except ValueError:
-        await update.message.reply_text(f"{E.WARNING} Invalid ID.")
+        await update.message.reply_text(
+            f"{E.WARNING} Invalid ID.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     giveaway = await get_giveaway(gid)
     if not giveaway:
-        await update.message.reply_text(f"{E.WARNING} Giveaway not found.")
+        await update.message.reply_text(
+            f"{E.WARNING} Giveaway not found.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     context.user_data["selected_giveaway_id"] = gid

@@ -84,7 +84,10 @@ async def giveaway_info_callback(update: Update, context: ContextTypes.DEFAULT_T
     from database import get_giveaway
     giveaway = await get_giveaway(gid)
     if not giveaway:
-        await query.edit_message_text(text=f"{E.CROSS} Giveaway not found.")
+        await query.edit_message_text(
+            text=f"{E.CROSS} Giveaway not found.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     name = giveaway["name"]

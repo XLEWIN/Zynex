@@ -98,7 +98,10 @@ async def sgive_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if query:
         await query.answer()
         if query.data == "cancel_setup":
-            await query.edit_message_text(f"{E.CROSS} Giveaway setup cancelled.")
+            await query.edit_message_text(
+                f"{E.CROSS} Giveaway setup cancelled.",
+                parse_mode=ParseMode.HTML,
+            )
             return ConversationHandler.END
         return
 
@@ -106,12 +109,14 @@ async def sgive_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not text:
         await update.message.reply_text(
             f"{E.WARNING} Name cannot be empty. Please enter a name:",
+            parse_mode=ParseMode.HTML,
         )
         return SGIVE_NAME
 
     if len(text) > MAX_GIVEAWAY_NAME_LEN:
         await update.message.reply_text(
             f"{E.WARNING} Name too long ({len(text)}/{MAX_GIVEAWAY_NAME_LEN}). Enter a shorter name:",
+            parse_mode=ParseMode.HTML,
         )
         return SGIVE_NAME
 
@@ -141,7 +146,10 @@ async def sgive_winners_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if query:
         await query.answer()
         if query.data == "cancel_setup":
-            await query.edit_message_text(f"{E.CROSS} Giveaway setup cancelled.")
+            await query.edit_message_text(
+                f"{E.CROSS} Giveaway setup cancelled.",
+                parse_mode=ParseMode.HTML,
+            )
             return ConversationHandler.END
         return
 
@@ -153,6 +161,7 @@ async def sgive_winners_handler(update: Update, context: ContextTypes.DEFAULT_TY
     except ValueError:
         await update.message.reply_text(
             f"{E.WARNING} Invalid number. Enter an integer between 1 and {MAX_WINNERS}:",
+            parse_mode=ParseMode.HTML,
         )
         return SGIVE_WINNERS
 
@@ -200,7 +209,10 @@ async def sgive_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if query:
         await query.answer()
         if query.data == "cancel_setup":
-            await query.edit_message_text(f"{E.CROSS} Giveaway setup cancelled.")
+            await query.edit_message_text(
+                f"{E.CROSS} Giveaway setup cancelled.",
+                parse_mode=ParseMode.HTML,
+            )
             return ConversationHandler.END
         return
 
@@ -263,6 +275,7 @@ async def sgive_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if end_utc <= start_utc:
         await update.message.reply_text(
             f"{E.WARNING} End time must be after start time.",
+            parse_mode=ParseMode.HTML,
         )
         return SGIVE_TIME
 
@@ -316,7 +329,10 @@ async def sgive_confirm_handler(update: Update, context: ContextTypes.DEFAULT_TY
     data = query.data
 
     if data.startswith("cancel_giveaway_") or data == "cancel_setup":
-        await query.edit_message_text(f"{E.CROSS} Giveaway setup cancelled.")
+        await query.edit_message_text(
+            f"{E.CROSS} Giveaway setup cancelled.",
+            parse_mode=ParseMode.HTML,
+        )
         return ConversationHandler.END
 
     if data.startswith("confirm_giveaway_"):
@@ -386,6 +402,7 @@ async def sgive_confirm_handler(update: Update, context: ContextTypes.DEFAULT_TY
             logger.error(f"Error creating giveaway: {e}", exc_info=True)
             await query.edit_message_text(
                 f"{E.CROSS} Error creating giveaway. Please try again.",
+                parse_mode=ParseMode.HTML,
             )
 
         return ConversationHandler.END

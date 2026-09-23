@@ -20,6 +20,7 @@ from database import (
     has_user_voted,
 )
 from utils.permissions import is_admin
+from utils import E
 from utils.keyboards import small_caps, BE
 from engines.vote_giveaway_engine import (
     register_participant,
@@ -32,10 +33,10 @@ logger = logging.getLogger("zynex.handlers.vote_giveaway")
 
 # ─── Helpers ──────────────────────────────────────────────────────
 
-NO_GIVEAWAY = "❌ There is no active giveaway right now."
+NO_GIVEAWAY = f"{E.CROSS} There is no active giveaway right now."
 
 DM_ONLY = (
-    "❌ This command can only be used in the bot's private messages.\n\n"
+    f"{E.CROSS} This command can only be used in the bot's private messages.\n\n"
     "Open a chat with me and try again."
 )
 
@@ -54,7 +55,7 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # DM only
     if message.chat.type != ChatType.PRIVATE:
-        await message.reply_text(DM_ONLY)
+        await message.reply_text(DM_ONLY, parse_mode=ParseMode.HTML)
         return
 
     user = update.effective_user
@@ -64,13 +65,13 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Active giveaway check
     giveaway = await _require_active_giveaway()
     if not giveaway:
-        await message.reply_text(NO_GIVEAWAY)
+        await message.reply_text(NO_GIVEAWAY, parse_mode=ParseMode.HTML)
         return
 
     # Argument check
     if not context.args:
         await message.reply_text(
-            "❌ Usage: <code>/join [participant_name]</code>",
+            f"{E.CROSS} Usage: <code>/join [participant_name]</code>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -90,23 +91,23 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not result["success"]:
         if "errors" in result:
             for err in result["errors"]:
-                await message.reply_text(err)
+                await message.reply_text(err, parse_mode=ParseMode.HTML)
         else:
-            await message.reply_text(result["error"])
+            await message.reply_text(result["error"], parse_mode=ParseMode.HTML)
         return
 
     p = result["participant"]
     name = html.escape(p["participant_name"])
 
     reply = (
-        f"🎉 <b>Giveaway Registration Successful!</b>\n\n"
-        f"👤 Participant: <b>{name}</b>\n"
-        f"🗳 Votes: <code>0</code>\n\n"
+        f"{E.PARTY} <b>Giveaway Registration Successful!</b>\n\n"
+        f"{E.PERSON} Participant: <b>{name}</b>\n"
+        f"{E.VOTE} Votes: <code>0</code>\n\n"
         f"Your voting entry has been created successfully."
     )
     if not result.get("channel_ok"):
         reply += (
-            "\n\n⚠️ Your channel post could not be created. "
+            f"\n\n{E.WARNING} Your channel post could not be created. "
             "An admin has been notified."
         )
         logger.warning(
@@ -126,7 +127,7 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if message.chat.type != ChatType.PRIVATE:
-        await message.reply_text(DM_ONLY)
+        await message.reply_text(DM_ONLY, parse_mode=ParseMode.HTML)
         return
 
     user = update.effective_user
@@ -135,14 +136,15 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     giveaway = await _require_active_giveaway()
     if not giveaway:
-        await message.reply_text(NO_GIVEAWAY)
+        await message.reply_text(NO_GIVEAWAY, parse_mode=ParseMode.HTML)
         return
 
     gid = giveaway["giveaway_id"]
     participant = await get_vote_participant_by_user(gid, user.id)
     if not participant:
         await message.reply_text(
-            "❌ You are not registered in this giveaway."
+            f"{E.CROSS} You are not registered in this giveaway.",
+            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -151,7 +153,7 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     name = html.escape(participant["participant_name"])
     await message.reply_text(
-        f"✅ Your giveaway registration has been revoked.\n\n"
+        f"{E.CHECK} Your giveaway registration has been revoked.\n\n"
         f"Participant: <b>{name}</b>",
         parse_mode=ParseMode.HTML,
     )
@@ -171,12 +173,12 @@ async def register_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     giveaway = await _require_active_giveaway()
     if not giveaway:
-        await message.reply_text(NO_GIVEAWAY)
+        await message.reply_text(NO_GIVEAWAY, parse_mode=ParseMode.HTML)
         return
 
     if not context.args:
         await message.reply_text(
-            "❌ Usage: <code>/register [participant_name]</code>",
+            f"{E.CROSS} Usage: <code>/register [participant_name]</code>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -193,14 +195,14 @@ async def register_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if not result["success"]:
-        await message.reply_text(result["error"])
+        await message.reply_text(result["error"], parse_mode=ParseMode.HTML)
         return
 
     p = result["participant"]
     name = html.escape(p["participant_name"])
     await message.reply_text(
-        f"✅ Registered: <b>{name}</b>\n"
-        f"🗳 Votes: <code>0</code>",
+        f"{E.CHECK} Registered: <b>{name}</b>\n"
+        f"{E.VOTE} Votes: <code>0</code>",
         parse_mode=ParseMode.HTML,
     )
 
@@ -219,7 +221,7 @@ async def addvote_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(context.args) < 2:
         await message.reply_text(
-            "❌ Usage: <code>/addvote [userid] [amount]</code>",
+            f"{E.CROSS} Usage: <code>/addvote [userid] [amount]</code>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -228,16 +230,22 @@ async def addvote_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_id = int(context.args[0])
         amount = int(context.args[1])
     except ValueError:
-        await message.reply_text("❌ Both arguments must be numbers.")
+        await message.reply_text(
+            f"{E.CROSS} Both arguments must be numbers.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     if amount <= 0:
-        await message.reply_text("❌ Amount must be a positive number.")
+        await message.reply_text(
+            f"{E.CROSS} Amount must be a positive number.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     giveaway = await _require_active_giveaway()
     if not giveaway:
-        await message.reply_text(NO_GIVEAWAY)
+        await message.reply_text(NO_GIVEAWAY, parse_mode=ParseMode.HTML)
         return
 
     result = await admin_adjust(
@@ -250,12 +258,12 @@ async def addvote_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if not result["success"]:
-        await message.reply_text(result["error"])
+        await message.reply_text(result["error"], parse_mode=ParseMode.HTML)
         return
 
     name = html.escape(result["participant"]["participant_name"])
     await message.reply_text(
-        f"✅ Added <code>{result['amount']}</code> votes to <b>{name}</b>.\n"
+        f"{E.CHECK} Added <code>{result['amount']}</code> votes to <b>{name}</b>.\n"
         f"Total: <code>{result['total']}</code>",
         parse_mode=ParseMode.HTML,
     )
@@ -275,7 +283,7 @@ async def rmvote_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(context.args) < 2:
         await message.reply_text(
-            "❌ Usage: <code>/rmvote [userid] [amount]</code>",
+            f"{E.CROSS} Usage: <code>/rmvote [userid] [amount]</code>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -284,16 +292,22 @@ async def rmvote_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_id = int(context.args[0])
         amount = int(context.args[1])
     except ValueError:
-        await message.reply_text("❌ Both arguments must be numbers.")
+        await message.reply_text(
+            f"{E.CROSS} Both arguments must be numbers.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     if amount <= 0:
-        await message.reply_text("❌ Amount must be a positive number.")
+        await message.reply_text(
+            f"{E.CROSS} Amount must be a positive number.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     giveaway = await _require_active_giveaway()
     if not giveaway:
-        await message.reply_text(NO_GIVEAWAY)
+        await message.reply_text(NO_GIVEAWAY, parse_mode=ParseMode.HTML)
         return
 
     result = await admin_adjust(
@@ -306,12 +320,12 @@ async def rmvote_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if not result["success"]:
-        await message.reply_text(result["error"])
+        await message.reply_text(result["error"], parse_mode=ParseMode.HTML)
         return
 
     name = html.escape(result["participant"]["participant_name"])
     await message.reply_text(
-        f"✅ Removed <code>{result['amount']}</code> votes from <b>{name}</b>.\n"
+        f"{E.CHECK} Removed <code>{result['amount']}</code> votes from <b>{name}</b>.\n"
         f"Total: <code>{result['total']}</code>",
         parse_mode=ParseMode.HTML,
     )
@@ -346,9 +360,9 @@ async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = result["status"]
 
     if status == "success":
+        # query.answer has no HTML — plain count only (no emojis per policy)
         await query.answer(
-            f"{result['message']}\n\n"
-            f"🗳 Vote Count: {result['vote_count']}",
+            f"Vote recorded. Count: {result['vote_count']}",
             show_alert=True,
         )
     elif status == "already_voted":

@@ -41,14 +41,15 @@ MAX_NAME_LEN = 32
 
 def validate_name(raw: str) -> tuple[bool, str]:
     """Validate a participant name. Returns (ok, name_or_error)."""
+    from emoji_packs import E
     name = raw.strip()
     if not name:
-        return False, "❌ Participant name cannot be empty."
+        return False, f"{E.CROSS} Participant name cannot be empty."
     if len(name) > MAX_NAME_LEN:
-        return False, f"❌ Name must be {MAX_NAME_LEN} characters or fewer."
+        return False, f"{E.CROSS} Name must be {MAX_NAME_LEN} characters or fewer."
     # Block control characters
     if any(ord(c) < 32 or ord(c) == 127 for c in name):
-        return False, "❌ Name contains invalid characters."
+        return False, f"{E.CROSS} Name contains invalid characters."
     # Escape HTML for safe rendering later
     return True, name
 
@@ -93,25 +94,26 @@ async def check_membership(bot: Bot, user_id: int) -> dict:
 
 
 def membership_messages(m: dict) -> list[str]:
-    """Build user-facing membership error messages."""
+    """Build user-facing membership error messages (HTML — premium emojis)."""
+    from emoji_packs import E
     msgs = []
     if m["channel_error"]:
-        msgs.append("❌ Could not verify channel membership. Please try again later.")
+        msgs.append(f"{E.CROSS} Could not verify channel membership. Please try again later.")
     elif not m["channel"]:
         msgs.append(
-            "❌ You must join our channel before joining the giveaway.\n\n"
+            f"{E.CROSS} You must join our channel before joining the giveaway.\n\n"
             "Please join the channel and try again."
         )
     if m["group_error"]:
-        msgs.append("❌ Could not verify group membership. Please try again later.")
+        msgs.append(f"{E.CROSS} Could not verify group membership. Please try again later.")
     elif not m["group"]:
         msgs.append(
-            "❌ You must join our group before joining the giveaway.\n\n"
+            f"{E.CROSS} You must join our group before joining the giveaway.\n\n"
             "Please join the group and try again."
         )
     if not m["channel"] and not m["group"] and not m["channel_error"] and not m["group_error"]:
         msgs = [
-            "❌ You must join both our channel and group before joining the giveaway.\n\n"
+            f"{E.CROSS} You must join both our channel and group before joining the giveaway.\n\n"
             "Please join both and try again."
         ]
     return msgs
@@ -129,8 +131,9 @@ def build_vote_button(participant_id: int, giveaway_id: int) -> InlineKeyboardMa
 
 def build_channel_message_text(name: str, total_votes: int) -> str:
     """Format the public voting message."""
+    from emoji_packs import E
     safe_name = html.escape(name)
-    return f"👤 <b>{safe_name}</b> : <code>{total_votes}</code>"
+    return f"{E.PERSON} <b>{safe_name}</b> : <code>{total_votes}</code>"
 
 
 async def update_channel_message(bot: Bot, participant: dict, giveaway_id: int) -> bool:
@@ -185,6 +188,7 @@ async def register_participant(
     telegram_user_id: int = None, owner_registered: bool = False,
 ) -> dict:
     """Register a participant. Returns {success, error?, participant?}."""
+    from emoji_packs import E
     # Validate name
     ok, name_or_err = validate_name(participant_name)
     if not ok:
@@ -205,7 +209,7 @@ async def register_participant(
             return {
                 "success": False,
                 "error": (
-                    "⚠️ You are already registered in this giveaway.\n\n"
+                    f"{E.WARNING} You are already registered in this giveaway.\n\n"
                     f"Participant: {existing['participant_name']}\n\n"
                     "Use /revoke if you want to remove your registration."
                 ),
@@ -217,7 +221,7 @@ async def register_participant(
         return {
             "success": False,
             "error": (
-                "❌ This participant name is already being used.\n"
+                f"{E.CROSS} This participant name is already being used.\n"
                 "Please choose another name."
             ),
         }
@@ -233,7 +237,7 @@ async def register_participant(
         return {
             "success": False,
             "error": (
-                "❌ This participant name is already being used.\n"
+                f"{E.CROSS} This participant name is already being used.\n"
                 "Please choose another name."
             ),
         }
@@ -253,34 +257,29 @@ async def register_participant(
 # ─── Vote Casting ─────────────────────────────────────────────────
 
 async def process_vote(bot: Bot, giveaway_id: int, participant_id: int, voter_id: int) -> dict:
-    """Process a vote with all validations. Returns {status, message, ...}."""
+    """Process a vote with all validations. Returns {status, message, ...}.
+    Messages go to query.answer — NO emojis per policy (plain text only)."""
     # 1. Giveaway active?
     g = await get_active_vote_giveaway()
     if not g or g["giveaway_id"] != giveaway_id:
-        return {"status": "ended", "message": "❌ This giveaway has ended."}
+        return {"status": "ended", "message": "This giveaway has ended."}
 
     # 2. Participant exists?
     participant = await get_vote_participant_by_id(participant_id)
     if not participant or participant["revoked"] or participant["giveaway_id"] != giveaway_id:
-        return {"status": "invalid", "message": "❌ This participant no longer exists."}
+        return {"status": "invalid", "message": "This participant no longer exists."}
 
     # 3. Membership check (fail open on API errors — cannot prove non-membership)
     m = await check_membership(bot, voter_id)
     if not m["channel"]:
         return {
             "status": "no_channel",
-            "message": (
-                "❌ You must join our channel before voting.\n\n"
-                "Join the channel and then press Vote Me again."
-            ),
+            "message": "You must join our channel before voting. Join the channel and press Vote Me again.",
         }
     if not m["group"]:
         return {
             "status": "no_group",
-            "message": (
-                "❌ You must join our group before voting.\n\n"
-                "Join the group and then press Vote Me again."
-            ),
+            "message": "You must join our group before voting. Join the group and press Vote Me again.",
         }
 
     # 4. Vote history check
@@ -292,7 +291,7 @@ async def process_vote(bot: Bot, giveaway_id: int, participant_id: int, voter_id
     if record and record["status"] == "active":
         return {
             "status": "already_voted",
-            "message": "⚠️ You have already used your vote in this giveaway.",
+            "message": "You have already used your vote in this giveaway.",
         }
 
     if record and record["status"] == "revoked":
@@ -300,7 +299,7 @@ async def process_vote(bot: Bot, giveaway_id: int, participant_id: int, voter_id
         if record["participant_id"] != participant_id:
             return {
                 "status": "wrong_participant",
-                "message": "⚠️ You can only vote for the same participant you voted for before.",
+                "message": "You can only vote for the same participant you voted for before.",
             }
         # Same participant — allow re-vote (will reactivate the existing row)
 
@@ -310,7 +309,7 @@ async def process_vote(bot: Bot, giveaway_id: int, participant_id: int, voter_id
         # Race condition — someone else voted at the same time
         return {
             "status": "already_voted",
-            "message": "⚠️ You have already used your vote in this giveaway.",
+            "message": "You have already used your vote in this giveaway.",
         }
 
     # 6. Update channel message
@@ -318,10 +317,9 @@ async def process_vote(bot: Bot, giveaway_id: int, participant_id: int, voter_id
     total = await get_vote_total(participant_id)
     await update_channel_message(bot, fresh, giveaway_id)
 
-    safe_name = html.escape(fresh["participant_name"])
     return {
         "status": "success",
-        "message": f"✅ You Have Successfully Voted {safe_name}!",
+        "message": "Vote recorded.",
         "vote_count": total,
         "participant_name": fresh["participant_name"],
     }
@@ -412,12 +410,13 @@ async def handle_membership_update(bot: Bot, update) -> list[int]:
 async def admin_adjust(bot: Bot, giveaway_id: int, telegram_user_id: int,
                        amount: int, admin_id: int, action: str) -> dict:
     """Add or remove admin votes for a participant linked to a Telegram user ID."""
+    from emoji_packs import E
     participant = await get_participant_by_user_id(giveaway_id, telegram_user_id)
     if not participant:
-        return {"success": False, "error": "❌ No active participant found with that user ID."}
+        return {"success": False, "error": f"{E.CROSS} No active participant found with that user ID."}
 
     if amount <= 0:
-        return {"success": False, "error": "❌ Amount must be a positive number."}
+        return {"success": False, "error": f"{E.CROSS} Amount must be a positive number."}
 
     if action == "add":
         await admin_add_votes(participant["id"], admin_id, giveaway_id, amount)

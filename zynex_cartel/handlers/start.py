@@ -129,7 +129,7 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"\n"
         f"<b>How to Participate:</b>\n"
         f"{E.GIVEAWAY} <b>Random:</b> Send any message in the giveaway group\n"
-        f"{E.SLOT} <b>Slot:</b> Send 🎰 in the giveaway group\n"
+        f"{E.SLOT} <b>Slot:</b> Send the slot machine emoji in the giveaway group\n"
         f"{E.VOTE} <b>Vote:</b> Use the vote buttons\n"
         f"\n"
         f"<b>ZYNEX CARTEL</b> {E.CROWN}"

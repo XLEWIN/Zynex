@@ -109,19 +109,33 @@ def giveaway_type_name(gtype: int) -> str:
 
 
 def giveaway_type_emoji(gtype: int) -> str:
+    """Premium custom emoji for a giveaway type (HTML messages only)."""
+    from emoji_packs import E
+    mapping = {
+        GiveawayType.VOTE: E.VOTE,
+        GiveawayType.RANDOM: E.GIVEAWAY,
+        GiveawayType.SLOT: E.SLOT,
+    }
+    return mapping.get(gtype, E.QUESTION)
+
+
+def giveaway_type_emoji_plain(gtype: int) -> str:
+    """Plain Unicode emoji for a giveaway type (inline buttons — no HTML)."""
     return GiveawayType.EMOJIS.get(gtype, "❓")
 
 
 def status_emoji(status: str) -> str:
+    """Premium custom emoji for a giveaway status (HTML messages only)."""
+    from emoji_packs import E
     mapping = {
-        GiveawayStatus.ACTIVE: "🟢",
-        GiveawayStatus.SCHEDULED: "🟡",
-        GiveawayStatus.ENDED: "🔴",
-        GiveawayStatus.CANCELLED: "⚫",
-        GiveawayStatus.DRAFT: "⚪",
-        GiveawayStatus.ENDING: "🟠",
+        GiveawayStatus.ACTIVE: E.CHECK,
+        GiveawayStatus.SCHEDULED: E.CLOCK,
+        GiveawayStatus.ENDED: E.CROSS,
+        GiveawayStatus.CANCELLED: E.CROSS,
+        GiveawayStatus.DRAFT: E.INFO,
+        GiveawayStatus.ENDING: E.WARNING,
     }
-    return mapping.get(status, "❓")
+    return mapping.get(status, E.QUESTION)
 
 
 def mention_user(user_id: int, name: str = None) -> str:

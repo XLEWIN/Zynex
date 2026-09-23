@@ -393,7 +393,7 @@ class AnnouncementManager:
         elif gtype == GiveawayType.SLOT:
             return (
                 f"{E.SLOT} <b>Slot Giveaway</b>\n"
-                f"Send the slot emoji <b>🎰</b> in this group.\n"
+                f"Send the slot emoji {E.SLOT} in this group.\n"
                 f"Match <b>7 7 7</b> to win!\n"
                 f"First triple-7 result wins."
             )

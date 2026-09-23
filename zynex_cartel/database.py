@@ -151,6 +151,48 @@ CREATE TABLE IF NOT EXISTS admin_winner_overrides (
     created_at   TEXT NOT NULL,
     FOREIGN KEY (giveaway_id) REFERENCES giveaways(giveaway_id)
 );
+
+-- ═══ VOTE GIVEAWAY SYSTEM ═══
+
+CREATE TABLE IF NOT EXISTS vote_participants (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    giveaway_id       INTEGER NOT NULL,
+    participant_name  TEXT NOT NULL,
+    telegram_user_id  INTEGER,
+    owner_registered  INTEGER DEFAULT 0,
+    user_votes        INTEGER DEFAULT 0,
+    admin_votes       INTEGER DEFAULT 0,
+    channel_message_id INTEGER,
+    created_at        TEXT NOT NULL,
+    revoked           INTEGER DEFAULT 0,
+    UNIQUE (giveaway_id, participant_name),
+    FOREIGN KEY (giveaway_id) REFERENCES giveaways(giveaway_id)
+);
+
+CREATE TABLE IF NOT EXISTS vote_votes (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    giveaway_id    INTEGER NOT NULL,
+    participant_id INTEGER NOT NULL,
+    voter_user_id  INTEGER NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'active',
+    created_at     TEXT NOT NULL,
+    revoked_at     TEXT,
+    UNIQUE (giveaway_id, voter_user_id),
+    FOREIGN KEY (giveaway_id) REFERENCES giveaways(giveaway_id),
+    FOREIGN KEY (participant_id) REFERENCES vote_participants(id)
+);
+
+CREATE TABLE IF NOT EXISTS vote_admin_logs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    giveaway_id    INTEGER NOT NULL,
+    participant_id INTEGER NOT NULL,
+    admin_id       INTEGER NOT NULL,
+    amount         INTEGER NOT NULL,
+    action         TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    FOREIGN KEY (giveaway_id) REFERENCES giveaways(giveaway_id),
+    FOREIGN KEY (participant_id) REFERENCES vote_participants(id)
+);
 """
 
 
@@ -610,3 +652,282 @@ async def add_audit_log(
          previous_state, new_state, utcnow()),
     )
     await db.commit()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# VOTE GIVEAWAY SYSTEM — Database Operations
+# ═══════════════════════════════════════════════════════════════════
+
+# ─── Vote Participant Operations ──────────────────────────────────
+
+async def get_active_vote_giveaway() -> Optional[dict]:
+    """Get the currently active vote-type giveaway (type=1)."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM giveaways WHERE type = 1 AND status = 'ACTIVE' ORDER BY giveaway_id DESC LIMIT 1"
+    )
+    return await cursor.fetchone()
+
+
+async def create_vote_participant(
+    giveaway_id: int, participant_name: str,
+    telegram_user_id: Optional[int] = None,
+    owner_registered: bool = False,
+) -> Optional[int]:
+    """Create a vote participant. Returns participant_id or None if duplicate."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """INSERT INTO vote_participants
+               (giveaway_id, participant_name, telegram_user_id, owner_registered, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (giveaway_id, participant_name, telegram_user_id, int(owner_registered), utcnow()),
+        )
+        await db.commit()
+        return cursor.lastrowid
+    except aiosqlite.IntegrityError:
+        return None
+
+
+async def get_vote_participant_by_user(giveaway_id: int, user_id: int) -> Optional[dict]:
+    """Get active participant by their Telegram user ID."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM vote_participants WHERE giveaway_id = ? AND telegram_user_id = ? AND revoked = 0",
+        (giveaway_id, user_id),
+    )
+    return await cursor.fetchone()
+
+
+async def get_vote_participant_by_id(participant_id: int) -> Optional[dict]:
+    """Get participant by internal ID."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM vote_participants WHERE id = ?", (participant_id,)
+    )
+    return await cursor.fetchone()
+
+
+async def get_vote_participant_by_name(giveaway_id: int, name: str) -> Optional[dict]:
+    """Get active participant by name (case-insensitive)."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM vote_participants WHERE giveaway_id = ? AND LOWER(participant_name) = LOWER(?) AND revoked = 0",
+        (giveaway_id, name),
+    )
+    return await cursor.fetchone()
+
+
+async def get_all_vote_participants(giveaway_id: int) -> list:
+    """Get all active (non-revoked) participants for a giveaway."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM vote_participants WHERE giveaway_id = ? AND revoked = 0 ORDER BY id",
+        (giveaway_id,),
+    )
+    return await cursor.fetchall()
+
+
+async def revoke_vote_participant(participant_id: int):
+    """Mark a participant as revoked."""
+    db = await get_db()
+    await db.execute(
+        "UPDATE vote_participants SET revoked = 1 WHERE id = ?", (participant_id,)
+    )
+    await db.commit()
+
+
+async def set_vote_channel_message(participant_id: int, message_id: int):
+    """Store the channel message ID for a participant."""
+    db = await get_db()
+    await db.execute(
+        "UPDATE vote_participants SET channel_message_id = ? WHERE id = ?",
+        (message_id, participant_id),
+    )
+    await db.commit()
+
+
+async def recalculate_vote_counts(participant_id: int):
+    """Recalculate user_votes from active votes. admin_votes is untouched."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT COUNT(*) FROM vote_votes WHERE participant_id = ? AND status = 'active'",
+        (participant_id,),
+    )
+    row = await cursor.fetchone()
+    user_count = row[0] if row else 0
+    await db.execute(
+        "UPDATE vote_participants SET user_votes = ? WHERE id = ?",
+        (user_count, participant_id),
+    )
+    await db.commit()
+
+
+async def get_vote_total(participant_id: int) -> int:
+    """Get total = user_votes + admin_votes."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT user_votes + admin_votes FROM vote_participants WHERE id = ?",
+        (participant_id,),
+    )
+    row = await cursor.fetchone()
+    return row[0] if row else 0
+
+
+# ─── Vote Casting Operations ──────────────────────────────────────
+
+async def cast_vote(giveaway_id: int, participant_id: int, voter_user_id: int) -> bool:
+    """Atomically cast a vote. Returns True on success, False if already voted."""
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        # Check existing vote (any status — active or revoked both block)
+        cursor = await db.execute(
+            "SELECT 1 FROM vote_votes WHERE giveaway_id = ? AND voter_user_id = ?",
+            (giveaway_id, voter_user_id),
+        )
+        existing = await cursor.fetchone()
+        if existing:
+            await db.execute("ROLLBACK")
+            return False
+
+        # Insert vote
+        await db.execute(
+            """INSERT INTO vote_votes
+               (giveaway_id, participant_id, voter_user_id, status, created_at)
+               VALUES (?, ?, ?, 'active', ?)""",
+            (giveaway_id, participant_id, voter_user_id, utcnow()),
+        )
+
+        # Increment user_votes
+        await db.execute(
+            "UPDATE vote_participants SET user_votes = user_votes + 1 WHERE id = ?",
+            (participant_id,),
+        )
+
+        await db.execute("COMMIT")
+        return True
+    except aiosqlite.IntegrityError:
+        await db.execute("ROLLBACK")
+        return False
+    except Exception:
+        try:
+            await db.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+
+
+async def has_user_voted(giveaway_id: int, voter_user_id: int) -> bool:
+    """Check if a user has EVER voted (active or revoked) — anti-cheat."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT 1 FROM vote_votes WHERE giveaway_id = ? AND voter_user_id = ?",
+        (giveaway_id, voter_user_id),
+    )
+    return await cursor.fetchone() is not None
+
+
+async def get_active_vote_record(giveaway_id: int, voter_user_id: int) -> Optional[dict]:
+    """Get the active vote record for a user."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM vote_votes WHERE giveaway_id = ? AND voter_user_id = ? AND status = 'active'",
+        (giveaway_id, voter_user_id),
+    )
+    return await cursor.fetchone()
+
+
+async def revoke_vote_by_voter(giveaway_id: int, voter_user_id: int) -> Optional[int]:
+    """Revoke a vote (membership loss). Returns participant_id or None."""
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute(
+            "SELECT participant_id FROM vote_votes WHERE giveaway_id = ? AND voter_user_id = ? AND status = 'active'",
+            (giveaway_id, voter_user_id),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            await db.execute("ROLLBACK")
+            return None
+
+        pid = row[0]
+        await db.execute(
+            "UPDATE vote_votes SET status = 'revoked', revoked_at = ? WHERE giveaway_id = ? AND voter_user_id = ?",
+            (utcnow(), giveaway_id, voter_user_id),
+        )
+        await db.execute(
+            "UPDATE vote_participants SET user_votes = MAX(user_votes - 1, 0) WHERE id = ?",
+            (pid,),
+        )
+        await db.execute("COMMIT")
+        return pid
+    except Exception:
+        try:
+            await db.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+
+
+async def get_all_active_voter_ids(giveaway_id: int) -> list[int]:
+    """Get all users with active votes for a giveaway."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT voter_user_id FROM vote_votes WHERE giveaway_id = ? AND status = 'active'",
+        (giveaway_id,),
+    )
+    rows = await cursor.fetchall()
+    return [row[0] for row in rows]
+
+
+# ─── Admin Vote Operations ────────────────────────────────────────
+
+async def admin_add_votes(participant_id: int, admin_id: int, giveaway_id: int, amount: int):
+    """Add admin votes (never creates fake voter records)."""
+    db = await get_db()
+    await db.execute(
+        "UPDATE vote_participants SET admin_votes = admin_votes + ? WHERE id = ?",
+        (amount, participant_id),
+    )
+    await db.execute(
+        """INSERT INTO vote_admin_logs
+           (giveaway_id, participant_id, admin_id, amount, action, created_at)
+           VALUES (?, ?, ?, ?, 'add', ?)""",
+        (giveaway_id, participant_id, admin_id, amount, utcnow()),
+    )
+    await db.commit()
+
+
+async def admin_remove_votes(participant_id: int, admin_id: int, giveaway_id: int, amount: int) -> int:
+    """Remove admin votes. Clamps at 0. Returns actual amount removed."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT admin_votes FROM vote_participants WHERE id = ?", (participant_id,)
+    )
+    row = await cursor.fetchone()
+    current = row[0] if row else 0
+    actual = min(amount, current)
+    await db.execute(
+        "UPDATE vote_participants SET admin_votes = admin_votes - ? WHERE id = ?",
+        (actual, participant_id),
+    )
+    await db.execute(
+        """INSERT INTO vote_admin_logs
+           (giveaway_id, participant_id, admin_id, amount, action, created_at)
+           VALUES (?, ?, ?, ?, 'remove', ?)""",
+        (giveaway_id, participant_id, admin_id, actual, utcnow()),
+    )
+    await db.commit()
+    return actual
+
+
+async def get_participant_by_user_id(giveaway_id: int, telegram_user_id: int) -> Optional[dict]:
+    """Find participant by their linked Telegram user ID."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM vote_participants WHERE giveaway_id = ? AND telegram_user_id = ? AND revoked = 0",
+        (giveaway_id, telegram_user_id),
+    )
+    return await cursor.fetchone()

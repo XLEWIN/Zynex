@@ -63,10 +63,37 @@ async def post_init(app: Application):
     await scheduler.resume_on_restart()
     logger.info("Scheduler started and resumed.")
 
+    # Start periodic vote reconciliation loop (fallback for missed chat_member updates)
+    from engines.vote_giveaway_engine import reconcile_votes
+    from database import get_active_vote_giveaway
+
+    async def _reconcile_loop():
+        while True:
+            try:
+                await asyncio.sleep(300)  # every 5 minutes
+                g = await get_active_vote_giveaway()
+                if g:
+                    await reconcile_votes(app.bot, g["giveaway_id"])
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"Vote reconciliation error: {e}")
+                await asyncio.sleep(60)
+
+    reconcile_task = asyncio.create_task(_reconcile_loop())
+    app.bot_data["reconcile_task"] = reconcile_task
+    logger.info("Vote reconciliation loop started (every 5 min).")
+
 
 async def post_shutdown(app: Application):
     """Called when the application is shutting down."""
     logger = logging.getLogger("zynex.main")
+
+    # Cancel reconciliation loop
+    reconcile_task = app.bot_data.get("reconcile_task")
+    if reconcile_task:
+        reconcile_task.cancel()
+        logger.info("Vote reconciliation stopped.")
 
     # Stop scheduler
     scheduler = app.bot_data.get("scheduler")
@@ -98,6 +125,7 @@ def main():
     from handlers.active import register_active_handlers
     from handlers.sgive import register_sgive_handlers
     from handlers.admin import register_admin_handlers, set_bot
+    from handlers.vote_giveaway import register_vote_giveaway_handlers
     from handlers.callbacks import CallbackManager
     from handlers.group import GroupMessageHandler
 
@@ -109,6 +137,7 @@ def main():
     register_active_handlers(app)
     register_sgive_handlers(app)
     register_admin_handlers(app)
+    register_vote_giveaway_handlers(app)
 
     # Callback manager
     callback_manager = CallbackManager(app.bot)
@@ -119,6 +148,15 @@ def main():
     group_handler = GroupMessageHandler(app.bot)
     for handler in group_handler.get_handlers():
         app.add_handler(handler)
+
+    # Membership monitoring — chat_member updates for live vote revocation
+    from telegram.ext import ChatMemberHandler
+    from engines.vote_giveaway_engine import handle_membership_update
+
+    async def _membership_watcher(update, context):
+        await handle_membership_update(context.bot, update)
+
+    app.add_handler(ChatMemberHandler(_membership_watcher, ChatMemberHandler.CHAT_MEMBER))
 
     logger.info("All handlers registered.")
     logger.info("ZYNEX CARTEL is now running!")

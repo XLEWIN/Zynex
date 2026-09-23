@@ -60,27 +60,36 @@ class AnnouncementManager:
 
         keyboard = giveaway_info_keyboard(gid, gtype)
 
-        # Send to group
+        # Send to group first, then copy to channel (preserves emoji rendering)
+        group_msg_id = None
         if group_id:
             try:
-                await self.bot.send_message(
+                msg = await self.bot.send_message(
                     chat_id=group_id,
                     text=text,
                     parse_mode=ParseMode.HTML,
                     reply_markup=keyboard,
                 )
+                group_msg_id = msg.message_id
                 logger.info(f"Announcement sent to group {group_id} for giveaway {gid}")
             except Exception as e:
                 logger.error(f"Failed to send group announcement for giveaway {gid}: {e}")
 
-        # Send to channel
         if channel_id:
             try:
-                await self.bot.send_message(
-                    chat_id=channel_id,
-                    text=text,
-                    parse_mode=ParseMode.HTML,
-                )
+                if group_msg_id:
+                    # Copy message to preserve emoji rendering
+                    await self.bot.copy_message(
+                        chat_id=channel_id,
+                        from_chat_id=group_id,
+                        message_id=group_msg_id,
+                    )
+                else:
+                    await self.bot.send_message(
+                        chat_id=channel_id,
+                        text=text,
+                        parse_mode=ParseMode.HTML,
+                    )
                 logger.info(f"Announcement sent to channel {channel_id} for giveaway {gid}")
             except Exception as e:
                 logger.error(f"Failed to send channel announcement for giveaway {gid}: {e}")
@@ -96,7 +105,15 @@ class AnnouncementManager:
         for i, w in enumerate(winners):
             medal = medals[i] if i < 3 else f"#{i+1}"
             uid = w["user_id"]
-            winner_lines.append(f"{medal} {mention_user(uid)}")
+            pname = w.get("name")
+            votes = w.get("votes")
+            if pname:
+                line = f"{medal} {mention_user(uid, pname)}"
+            else:
+                line = f"{medal} {mention_user(uid)}"
+            if votes is not None:
+                line += f" — <code>{votes}</code> votes"
+            winner_lines.append(line)
 
         winners_text = "\n".join(winner_lines) if winner_lines else "<i>No winners</i>"
 
@@ -119,17 +136,37 @@ class AnnouncementManager:
             f"<b>ZYNEX CARTEL</b> {E.CROWN}"
         )
 
-        for target_id in [group_id, channel_id]:
-            if target_id:
-                try:
+        # Send to group first, then copy to channel
+        group_msg_id = None
+        if group_id:
+            try:
+                msg = await self.bot.send_message(
+                    chat_id=group_id,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                )
+                group_msg_id = msg.message_id
+                logger.info(f"Winner announcement sent to {group_id}")
+            except Exception as e:
+                logger.error(f"Failed to send winner announcement to {group_id}: {e}")
+
+        if channel_id:
+            try:
+                if group_msg_id:
+                    await self.bot.copy_message(
+                        chat_id=channel_id,
+                        from_chat_id=group_id,
+                        message_id=group_msg_id,
+                    )
+                else:
                     await self.bot.send_message(
-                        chat_id=target_id,
+                        chat_id=channel_id,
                         text=text,
                         parse_mode=ParseMode.HTML,
                     )
-                    logger.info(f"Winner announcement sent to {target_id}")
-                except Exception as e:
-                    logger.error(f"Failed to send winner announcement to {target_id}: {e}")
+                logger.info(f"Winner announcement sent to {channel_id}")
+            except Exception as e:
+                logger.error(f"Failed to send winner announcement to {channel_id}: {e}")
 
     async def send_vote_leaderboard(self, chat_id: int, giveaway: dict, leaderboard: list):
         """Send the current vote leaderboard."""

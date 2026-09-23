@@ -498,13 +498,9 @@ async def add_winner(
     selection_method: str, selected_by: int = None
 ):
     db = await get_db()
-    # Delete existing winner at this position first to avoid UNIQUE constraint
+    # Use INSERT OR REPLACE — atomic, no UNIQUE constraint race
     await db.execute(
-        "DELETE FROM giveaway_winners WHERE giveaway_id = ? AND position = ?",
-        (giveaway_id, position),
-    )
-    await db.execute(
-        """INSERT INTO giveaway_winners
+        """INSERT OR REPLACE INTO giveaway_winners
            (giveaway_id, user_id, position, selection_method, selected_at, selected_by)
            VALUES (?, ?, ?, ?, ?, ?)""",
         (giveaway_id, user_id, position, selection_method, utcnow(), selected_by),
@@ -764,10 +760,10 @@ async def recalculate_vote_counts(participant_id: int):
 
 
 async def get_vote_total(participant_id: int) -> int:
-    """Get total = user_votes + admin_votes."""
+    """Get total active votes from vote_votes table (source of truth)."""
     db = await get_db()
     cursor = await db.execute(
-        "SELECT user_votes + admin_votes FROM vote_participants WHERE id = ?",
+        "SELECT COUNT(*) FROM vote_votes WHERE participant_id = ? AND status = 'active'",
         (participant_id,),
     )
     row = await cursor.fetchone()
@@ -777,34 +773,58 @@ async def get_vote_total(participant_id: int) -> int:
 # ─── Vote Casting Operations ──────────────────────────────────────
 
 async def cast_vote(giveaway_id: int, participant_id: int, voter_user_id: int) -> bool:
-    """Atomically cast a vote. Returns True on success, False if already voted."""
+    """Atomically cast a vote. Returns True on success, False if already voted.
+    If a revoked vote exists for the SAME participant, reactivate it (rejoin case).
+    """
     db = await get_db()
     try:
         await db.execute("BEGIN IMMEDIATE")
-        # Check existing vote (any status — active or revoked both block)
+
+        # Check existing vote
         cursor = await db.execute(
-            "SELECT 1 FROM vote_votes WHERE giveaway_id = ? AND voter_user_id = ?",
+            "SELECT status, participant_id FROM vote_votes WHERE giveaway_id = ? AND voter_user_id = ?",
             (giveaway_id, voter_user_id),
         )
         existing = await cursor.fetchone()
-        if existing:
-            await db.execute("ROLLBACK")
-            return False
 
-        # Insert vote
+        if existing:
+            old_status = existing["status"]
+            old_pid = existing["participant_id"]
+
+            if old_status == "active":
+                await db.execute("ROLLBACK")
+                return False
+
+            # Revoked vote — only reactivate if SAME participant
+            if old_pid != participant_id:
+                await db.execute("ROLLBACK")
+                return False
+
+            # Reactivate: same participant, user rejoined
+            await db.execute(
+                """UPDATE vote_votes
+                   SET status = 'active', revoked_at = NULL, created_at = ?
+                   WHERE giveaway_id = ? AND voter_user_id = ?""",
+                (utcnow(), giveaway_id, voter_user_id),
+            )
+            await db.execute(
+                "UPDATE vote_participants SET user_votes = user_votes + 1 WHERE id = ?",
+                (participant_id,),
+            )
+            await db.execute("COMMIT")
+            return True
+
+        # No existing record — insert new vote
         await db.execute(
             """INSERT INTO vote_votes
                (giveaway_id, participant_id, voter_user_id, status, created_at)
                VALUES (?, ?, ?, 'active', ?)""",
             (giveaway_id, participant_id, voter_user_id, utcnow()),
         )
-
-        # Increment user_votes
         await db.execute(
             "UPDATE vote_participants SET user_votes = user_votes + 1 WHERE id = ?",
             (participant_id,),
         )
-
         await db.execute("COMMIT")
         return True
     except aiosqlite.IntegrityError:
@@ -818,11 +838,21 @@ async def cast_vote(giveaway_id: int, participant_id: int, voter_user_id: int) -
         raise
 
 
-async def has_user_voted(giveaway_id: int, voter_user_id: int) -> bool:
-    """Check if a user has EVER voted (active or revoked) — anti-cheat."""
+async def get_vote_record(giveaway_id: int, voter_user_id: int) -> Optional[dict]:
+    """Get any vote record (active or revoked) for a user."""
     db = await get_db()
     cursor = await db.execute(
-        "SELECT 1 FROM vote_votes WHERE giveaway_id = ? AND voter_user_id = ?",
+        "SELECT * FROM vote_votes WHERE giveaway_id = ? AND voter_user_id = ?",
+        (giveaway_id, voter_user_id),
+    )
+    return await cursor.fetchone()
+
+
+async def has_user_voted(giveaway_id: int, voter_user_id: int) -> bool:
+    """Check if a user has an ACTIVE vote."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT 1 FROM vote_votes WHERE giveaway_id = ? AND voter_user_id = ? AND status = 'active'",
         (giveaway_id, voter_user_id),
     )
     return await cursor.fetchone() is not None
@@ -884,12 +914,39 @@ async def get_all_active_voter_ids(giveaway_id: int) -> list[int]:
 
 # ─── Admin Vote Operations ────────────────────────────────────────
 
+# Admin votes use voter_user_id = -(admin_id * 1_000_000 + seq) to create real records
+# without conflicting with the UNIQUE(giveaway_id, voter_user_id) constraint.
+
+_admin_vote_seq = 0
+
+
 async def admin_add_votes(participant_id: int, admin_id: int, giveaway_id: int, amount: int):
-    """Add admin votes (never creates fake voter records)."""
+    """Add admin votes as REAL records in vote_votes."""
+    global _admin_vote_seq
     db = await get_db()
+    _admin_vote_seq += 1
+    # Negative unique ID: -(admin_id * 1_000_000 + seq) — never collides with real users
+    marker_voter_id = -(admin_id * 1_000_000 + _admin_vote_seq)
+
+    for _ in range(amount):
+        _admin_vote_seq += 1
+        marker = -(admin_id * 1_000_000 + _admin_vote_seq)
+        await db.execute(
+            """INSERT INTO vote_votes
+               (giveaway_id, participant_id, voter_user_id, status, created_at)
+               VALUES (?, ?, ?, 'active', ?)""",
+            (giveaway_id, participant_id, marker, utcnow()),
+        )
+
+    # Track on participant for admin audit
     await db.execute(
         "UPDATE vote_participants SET admin_votes = admin_votes + ? WHERE id = ?",
         (amount, participant_id),
+    )
+    # Recalculate user_votes from all active vote records
+    await db.execute(
+        "UPDATE vote_participants SET user_votes = (SELECT COUNT(*) FROM vote_votes WHERE participant_id = ? AND status = 'active') WHERE id = ?",
+        (participant_id, participant_id),
     )
     await db.execute(
         """INSERT INTO vote_admin_logs
@@ -909,10 +966,35 @@ async def admin_remove_votes(participant_id: int, admin_id: int, giveaway_id: in
     row = await cursor.fetchone()
     current = row[0] if row else 0
     actual = min(amount, current)
-    await db.execute(
-        "UPDATE vote_participants SET admin_votes = admin_votes - ? WHERE id = ?",
-        (actual, participant_id),
-    )
+
+    if actual > 0:
+        # Remove real admin vote records (negative voter IDs)
+        cursor = await db.execute(
+            """SELECT id FROM vote_votes
+               WHERE giveaway_id = ? AND participant_id = ?
+                 AND voter_user_id < 0 AND status = 'active'
+               ORDER BY id DESC LIMIT ?""",
+            (giveaway_id, participant_id, actual),
+        )
+        rows = await cursor.fetchall()
+        ids = [r[0] for r in rows]
+        if ids:
+            placeholders = ",".join("?" * len(ids))
+            await db.execute(
+                f"DELETE FROM vote_votes WHERE id IN ({placeholders})",
+                ids,
+            )
+
+        await db.execute(
+            "UPDATE vote_participants SET admin_votes = MAX(admin_votes - ?, 0) WHERE id = ?",
+            (actual, participant_id),
+        )
+        # Recalculate user_votes from remaining active vote records
+        await db.execute(
+            "UPDATE vote_participants SET user_votes = (SELECT COUNT(*) FROM vote_votes WHERE participant_id = ? AND status = 'active') WHERE id = ?",
+            (participant_id, participant_id),
+        )
+
     await db.execute(
         """INSERT INTO vote_admin_logs
            (giveaway_id, participant_id, admin_id, amount, action, created_at)

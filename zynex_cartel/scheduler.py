@@ -15,7 +15,7 @@ from database import (
     add_audit_log, get_db, get_admin_winner_overrides
 )
 from config import GiveawayType
-from utils import from_utc_iso, is_expired, is_started
+from utils import from_utc_iso, is_expired, is_started, E
 from engines.vote_engine import VoteGiveawayEngine
 from engines.random_engine import RandomGiveawayEngine
 from engines.slot_engine import SlotGiveawayEngine
@@ -133,7 +133,8 @@ class GiveawayScheduler:
                 winners = []
 
                 if gtype == GiveawayType.VOTE:
-                    winners = await self.vote_engine.select_winners(gid)
+                    from engines.vote_giveaway_engine import select_vote_winners
+                    winners = await select_vote_winners(gid, giveaway["winner_count"])
 
                 elif gtype == GiveawayType.RANDOM:
                     winners = await self.random_engine.select_winners(gid)

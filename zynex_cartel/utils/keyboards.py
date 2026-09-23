@@ -97,38 +97,72 @@ class BE:
     HOME        = "🏠"
 
 
-# ─── Colored Button Builders (Robin-style with small caps) ────────
+# ─── Colored Button Builders (Bot API 9.4+ native styles) ────────
+# Ported from Pi bot (bot/keyboards/colored.py).
+# Uses Telegram's native button styling via api_kwargs — real colors:
+#   success → Green · primary → Blue · danger → Red · default → White
 
-def btn_green(text: str, callback_data: str) -> InlineKeyboardButton:
-    """Green-themed button — affirmative/confirm actions."""
-    return InlineKeyboardButton(f"🟩 {small_caps(text)}", callback_data=callback_data)
+def btn_success(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Green/success colored button (native Bot API 9.4+)."""
+    return InlineKeyboardButton(
+        small_caps(text), callback_data=callback_data,
+        api_kwargs={"style": "success"},
+    )
 
-def btn_red(text: str, callback_data: str) -> InlineKeyboardButton:
-    """Red-themed button — negative/cancel/danger actions."""
-    return InlineKeyboardButton(f"🟥 {small_caps(text)}", callback_data=callback_data)
+def btn_primary(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Blue/primary colored button (native Bot API 9.4+)."""
+    return InlineKeyboardButton(
+        small_caps(text), callback_data=callback_data,
+        api_kwargs={"style": "primary"},
+    )
 
-def btn_blue(text: str, callback_data: str) -> InlineKeyboardButton:
-    """Blue-themed button — informational/neutral actions."""
-    return InlineKeyboardButton(f"🟦 {small_caps(text)}", callback_data=callback_data)
+def btn_danger(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Red/danger colored button (native Bot API 9.4+)."""
+    return InlineKeyboardButton(
+        small_caps(text), callback_data=callback_data,
+        api_kwargs={"style": "danger"},
+    )
 
-def btn_yellow(text: str, callback_data: str) -> InlineKeyboardButton:
-    """Yellow-themed button — warning/pending actions."""
-    return InlineKeyboardButton(f"🟨 {small_caps(text)}", callback_data=callback_data)
-
-def btn_purple(text: str, callback_data: str) -> InlineKeyboardButton:
-    """Purple-themed button — special/admin actions."""
-    return InlineKeyboardButton(f"🟪 {small_caps(text)}", callback_data=callback_data)
-
-def btn_orange(text: str, callback_data: str) -> InlineKeyboardButton:
-    """Orange-themed button — moderate actions."""
-    return InlineKeyboardButton(f"🟧 {small_caps(text)}", callback_data=callback_data)
-
-def btn(text: str, callback_data: str) -> InlineKeyboardButton:
-    """Plain button with small caps text, no color prefix."""
+def btn_default(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Default/white colored button."""
     return InlineKeyboardButton(small_caps(text), callback_data=callback_data)
 
+def btn_url(text: str, url: str) -> InlineKeyboardButton:
+    """URL button."""
+    return InlineKeyboardButton(small_caps(text), url=url)
+
+
+# Legacy aliases — map old Robin-style names to native styles.
+def btn_green(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Green-themed button → native success style."""
+    return btn_success(text, callback_data)
+
+def btn_blue(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Blue-themed button → native primary style."""
+    return btn_primary(text, callback_data)
+
+def btn_red(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Red-themed button → native danger style."""
+    return btn_danger(text, callback_data)
+
+def btn_yellow(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Yellow-themed button → default style (no native yellow)."""
+    return btn_default(text, callback_data)
+
+def btn_purple(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Purple-themed button → default style (no native purple)."""
+    return btn_default(text, callback_data)
+
+def btn_orange(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Orange-themed button → default style (no native orange)."""
+    return btn_default(text, callback_data)
+
+def btn(text: str, callback_data: str) -> InlineKeyboardButton:
+    """Plain button with small caps text, no color."""
+    return btn_default(text, callback_data)
+
 def btn_icon(emoji: str, text: str, callback_data: str) -> InlineKeyboardButton:
-    """Button with icon emoji + small caps text."""
+    """Button with icon emoji + small caps text (default style)."""
     return InlineKeyboardButton(f"{emoji} {small_caps(text)}", callback_data=callback_data)
 
 
@@ -177,16 +211,16 @@ def active_giveaways_keyboard(giveaways: list[dict]) -> InlineKeyboardMarkup:
 
 
 def giveaway_info_keyboard(giveaway_id: int, gtype: int) -> InlineKeyboardMarkup:
-    """Actions for a specific giveaway."""
+    """Actions for a specific giveaway — colored buttons."""
     buttons = []
     if gtype == 1:  # Vote
-        buttons.append([btn_icon(BE.VOTE, "Vote Now", f"vote_start_{giveaway_id}")])
-        buttons.append([btn_icon(BE.CHART, "Leaderboard", f"leaderboard_{giveaway_id}")])
+        buttons.append([btn_green(f"{BE.VOTE} Vote Now", f"vote_start_{giveaway_id}")])
+        buttons.append([btn_blue(f"{BE.CHART} Leaderboard", f"leaderboard_{giveaway_id}")])
     elif gtype == 2:  # Random — no button, participate by sending message in group
         pass
     elif gtype == 3:  # Slot
-        buttons.append([btn_icon(BE.SLOT, "Spin to Win!", f"info_slot_{giveaway_id}")])
-    buttons.append([btn_icon(BE.USERS, "Participants", f"participant_count_{giveaway_id}")])
+        buttons.append([btn_green(f"{BE.SLOT} Spin To Win!", f"info_slot_{giveaway_id}")])
+    buttons.append([btn_blue(f"{BE.USERS} Participants", f"participant_count_{giveaway_id}")])
     return InlineKeyboardMarkup(buttons)
 
 

@@ -56,35 +56,38 @@ def validate_name(raw: str) -> tuple[bool, str]:
 # ─── Membership Checker ───────────────────────────────────────────
 
 async def check_membership(bot: Bot, user_id: int) -> dict:
-    """Check channel and group membership. Never trusts API failures as 'member'.
+    """Check channel and group membership.
     Returns {channel: bool, group: bool, channel_error: bool, group_error: bool}
+    If the API fails (bot lacks permission etc), treat as PASS — we cannot prove non-membership.
     """
     result = {
-        "channel": False, "group": False,
+        "channel": True, "group": True,
         "channel_error": False, "group_error": False,
     }
 
     # Channel check
     try:
         member = await bot.get_chat_member(chat_id=GIVEAWAY_CHANNEL_ID, user_id=user_id)
-        result["channel"] = member.status not in (
-            ChatMemberStatus.LEFT, ChatMemberStatus.BANNED, "left", "kicked",
-        )
+        status = str(member.status).lower()
+        if status in ("left", "banned", "kicked"):
+            result["channel"] = False
     except TelegramError as e:
+        # Cannot verify — do NOT block (fail open for membership)
         logger.warning(f"Channel membership check failed for {user_id}: {e}")
         result["channel_error"] = True
-        result["channel"] = False  # Fail safe
+        result["channel"] = True  # Fail open
 
     # Group check
     try:
         member = await bot.get_chat_member(chat_id=GIVEAWAY_GROUP_ID, user_id=user_id)
-        result["group"] = member.status not in (
-            ChatMemberStatus.LEFT, ChatMemberStatus.BANNED, "left", "kicked",
-        )
+        status = str(member.status).lower()
+        if status in ("left", "banned", "kicked"):
+            result["group"] = False
     except TelegramError as e:
+        # Cannot verify — do NOT block
         logger.warning(f"Group membership check failed for {user_id}: {e}")
         result["group_error"] = True
-        result["group"] = False  # Fail safe
+        result["group"] = True  # Fail open
 
     return result
 
@@ -117,13 +120,10 @@ def membership_messages(m: dict) -> list[str]:
 # ─── Channel Message Builder ──────────────────────────────────────
 
 def build_vote_button(participant_id: int, giveaway_id: int) -> InlineKeyboardMarkup:
-    """Colored inline vote button."""
-    from utils.keyboards import small_caps, BE
+    """Colored inline vote button — native green/success style (Bot API 9.4+)."""
+    from utils.keyboards import small_caps, btn_success, BE
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            f"🗳️ {small_caps('Vote Me')}",
-            callback_data=f"vgvote:{giveaway_id}:{participant_id}",
-        )],
+        [btn_success(f"{BE.VOTE} Vote Me", f"vgvote:{giveaway_id}:{participant_id}")],
     ])
 
 
@@ -264,13 +264,8 @@ async def process_vote(bot: Bot, giveaway_id: int, participant_id: int, voter_id
     if not participant or participant["revoked"] or participant["giveaway_id"] != giveaway_id:
         return {"status": "invalid", "message": "❌ This participant no longer exists."}
 
-    # 3. Membership check
+    # 3. Membership check (fail open on API errors — cannot prove non-membership)
     m = await check_membership(bot, voter_id)
-    if m["channel_error"] or m["group_error"]:
-        return {
-            "status": "error",
-            "message": "❌ Could not verify your membership. Please try again.",
-        }
     if not m["channel"]:
         return {
             "status": "no_channel",
@@ -288,12 +283,26 @@ async def process_vote(bot: Bot, giveaway_id: int, participant_id: int, voter_id
             ),
         }
 
-    # 4. Already voted? (checks active AND revoked — anti-cheat)
-    if await has_user_voted(giveaway_id, voter_id):
+    # 4. Vote history check
+    #    - Active vote → block
+    #    - Revoked vote (left group) → allow ONLY for the same participant
+    from database import get_vote_record
+    record = await get_vote_record(giveaway_id, voter_id)
+
+    if record and record["status"] == "active":
         return {
             "status": "already_voted",
             "message": "⚠️ You have already used your vote in this giveaway.",
         }
+
+    if record and record["status"] == "revoked":
+        # Can only re-vote for the SAME participant they originally voted for
+        if record["participant_id"] != participant_id:
+            return {
+                "status": "wrong_participant",
+                "message": "⚠️ You can only vote for the same participant you voted for before.",
+            }
+        # Same participant — allow re-vote (will reactivate the existing row)
 
     # 5. Cast vote (atomic, DB-level unique constraint)
     success = await cast_vote(giveaway_id, participant_id, voter_id)
@@ -358,17 +367,17 @@ async def handle_membership_update(bot: Bot, update) -> list[int]:
     """Process a chat_member update. If user left required chat, revoke their vote.
     Returns list of participant_ids affected."""
     try:
-        result = update.chat_member or update.my_chat_member
-        if not result:
+        # ChatMemberHandler puts data in update.chat_member or update.my_chat_member
+        member_update = getattr(update, "chat_member", None) or getattr(update, "my_chat_member", None)
+        if not member_update:
             return []
 
-        chat_id = update.chat.id
-        user_id = result.new_chat_member.user.id
-        new_status = result.new_chat_member.status
+        chat = member_update.chat
+        new_status = member_update.new_chat_member.status
+        user_id = member_update.new_chat_member.user.id
 
         # Only care about leaving the required channel or group
-        relevant_chat = chat_id in (GIVEAWAY_CHANNEL_ID, GIVEAWAY_GROUP_ID)
-        if not relevant_chat:
+        if chat.id not in (GIVEAWAY_CHANNEL_ID, GIVEAWAY_GROUP_ID):
             return []
 
         left = new_status in (ChatMemberStatus.LEFT, ChatMemberStatus.BANNED, "left", "kicked")
@@ -388,7 +397,7 @@ async def handle_membership_update(bot: Bot, update) -> list[int]:
                 if participant:
                     await update_channel_message(bot, participant, gid)
                 logger.info(
-                    f"Vote revoked: user {user_id} left chat {chat_id} in giveaway {gid}"
+                    f"Vote revoked: user {user_id} left chat {chat.id} in giveaway {gid}"
                 )
                 return [pid]
 
@@ -427,3 +436,57 @@ async def admin_adjust(bot: Bot, giveaway_id: int, telegram_user_id: int,
         "amount": removed,
         "total": total,
     }
+
+
+# ─── Winner Selection ─────────────────────────────────────────────
+
+async def select_vote_winners(giveaway_id: int, winner_count: int) -> list[dict]:
+    """Select winners: participants with the most total votes.
+    Strict ordering: 1st has most, 2nd has fewer than 1st, 3rd fewer than 2nd.
+    Ties: only the earliest registered wins that position; next goes to lower count.
+    Returns list of {user_id, name, position, selection_method, votes}."""
+    participants = await get_all_vote_participants(giveaway_id)
+    if not participants:
+        return []
+
+    # Build ranked list — only participants with a real Telegram user ID
+    ranked = []
+    for p in participants:
+        if not p["telegram_user_id"]:
+            continue  # Skip owner-created entries with no real user
+        total = await get_vote_total(p["id"])
+        ranked.append({
+            "participant_id": p["id"],
+            "name": p["participant_name"],
+            "telegram_user_id": p["telegram_user_id"],
+            "total_votes": total,
+        })
+
+    if not ranked:
+        return []
+
+    # Sort: most votes first, earliest registration breaks ties
+    ranked.sort(key=lambda x: (-x["total_votes"], x["participant_id"]))
+
+    # Strict ordering: each winner must have FEWER votes than the previous
+    winners = []
+    prev_votes = None
+    for entry in ranked:
+        if len(winners) >= winner_count:
+            break
+        # Skip if same votes as previous winner (must be strictly less)
+        if prev_votes is not None and entry["total_votes"] >= prev_votes:
+            continue
+        # Must have at least 1 vote to win
+        if entry["total_votes"] <= 0:
+            continue
+        winners.append({
+            "user_id": entry["telegram_user_id"],
+            "name": entry["name"],
+            "position": len(winners) + 1,
+            "selection_method": "VOTE",
+            "votes": entry["total_votes"],
+        })
+        prev_votes = entry["total_votes"]
+
+    return winners

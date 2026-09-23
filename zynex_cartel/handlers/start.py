@@ -126,6 +126,11 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>User Commands:</b>\n"
         f"/start — Start the bot\n"
         f"/active — View active giveaways\n"
+        f"/mystatus — Your vote status & rank\n"
+        f"/leaderboard — Vote leaderboard (paginated)\n"
+        f"/mylink — Direct link to your channel post\n"
+        f"/join [name] — Register for the vote giveaway\n"
+        f"/revoke — Leave the current vote giveaway\n"
         f"\n"
         f"<b>How to Participate:</b>\n"
         f"{E.GIVEAWAY} <b>Random:</b> Send any message in the giveaway group\n"
@@ -241,9 +246,42 @@ async def adminhelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /help — same content as the help button."""
+    if not update.message:
+        return
+    from utils.keyboards import main_menu_keyboard
+
+    text = (
+        f"{E.INFO} <b>ZYNEX CARTEL — Help</b>\n"
+        f"\n"
+        f"<b>User Commands:</b>\n"
+        f"/start — Start the bot\n"
+        f"/active — View active giveaways\n"
+        f"/mystatus — Your vote status & rank\n"
+        f"/leaderboard — Vote leaderboard (paginated)\n"
+        f"/mylink — Direct link to your channel post\n"
+        f"/join [name] — Register for the vote giveaway\n"
+        f"/revoke — Leave the current vote giveaway\n"
+        f"\n"
+        f"<b>How to Participate:</b>\n"
+        f"{E.GIVEAWAY} <b>Random:</b> Send any message in the giveaway group\n"
+        f"{E.SLOT} <b>Slot:</b> Send the slot machine emoji in the giveaway group\n"
+        f"{E.VOTE} <b>Vote:</b> Use the vote buttons\n"
+        f"\n"
+        f"<b>ZYNEX CARTEL</b> {E.CROWN}"
+    )
+    await update.message.reply_text(
+        text=text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=main_menu_keyboard(),
+    )
+
+
 # Handler registration
 def register_start_handlers(app):
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("adminhelp", adminhelp_command))
     app.add_handler(CallbackQueryHandler(verify_membership_callback, pattern="^verify_membership$"))
     app.add_handler(CallbackQueryHandler(help_callback, pattern="^show_help$"))

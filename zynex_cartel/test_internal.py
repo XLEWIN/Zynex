@@ -432,6 +432,156 @@ async def test_db_and_vote_flow():
     check("admin_adjust amount>0 required", zero.get("success") is False and "tg-emoji" in zero.get("error", ""), str(zero))
 
 
+async def test_participant_commands():
+    print("\n== participant commands (rank/leaderboard/link) ==")
+    import database as db
+    from engines.vote_giveaway_engine import (
+        build_participant_message_link,
+        get_leaderboard_page,
+        get_user_rank_info,
+        get_user_participant,
+        generate_participant_message_link,
+    )
+    from handlers.participant import (
+        mystatus_keyboard,
+        leaderboard_keyboard,
+        mylink_keyboard,
+        _leaderboard_text,
+        _status_registered_text,
+        STALE_LEADERBOARD,
+    )
+
+    # ── Pure link builder ──
+    public = build_participant_message_link(-1004484790002, 55, channel_username="ZynexOfficial")
+    check("public channel link", public == "https://t.me/ZynexOfficial/55", str(public))
+    public_at = build_participant_message_link(-1004484790002, 55, channel_username="@ZynexOfficial")
+    check("public link strips @", public_at == "https://t.me/ZynexOfficial/55", str(public_at))
+    private = build_participant_message_link(-1004484790002, 55, channel_username=None)
+    check(
+        "private channel c/ link",
+        private is not None and private.startswith("https://t.me/c/") and private.endswith("/55"),
+        str(private),
+    )
+    no_msg = build_participant_message_link(-1004484790002, None, channel_username="x")
+    check("no message_id → None", no_msg is None, str(no_msg))
+
+    # ── Competition ranking: ties share rank (1,1,3) ──
+    start = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    end = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    # End any prior active type-1 giveaways so this is THE active one
+    prev = await db.get_active_vote_giveaway()
+    if prev:
+        await db.update_giveaway_status(prev["giveaway_id"], "ENDED")
+    gid = await db.create_giveaway("RankLB", 1, 1, start, end, -1003777955255, -1004484790002, 8301883098)
+    await db.update_giveaway_status(gid, "ACTIVE")
+
+    pa = await db.create_vote_participant(gid, "RankA", telegram_user_id=5001, owner_registered=True)
+    pb = await db.create_vote_participant(gid, "RankB", telegram_user_id=5002, owner_registered=True)
+    pc = await db.create_vote_participant(gid, "RankC", telegram_user_id=5003, owner_registered=True)
+    await db.admin_add_votes(pa, 8301883098, gid, 5)
+    await db.admin_add_votes(pb, 8301883098, gid, 5)
+    await db.admin_add_votes(pc, 8301883098, gid, 3)
+
+    ra = await db.get_participant_rank(gid, pa)
+    rb = await db.get_participant_rank(gid, pb)
+    rc = await db.get_participant_rank(gid, pc)
+    check(
+        "competition ranking 1,1,3",
+        ra and rb and rc and int(ra["rank_num"]) == 1 and int(rb["rank_num"]) == 1 and int(rc["rank_num"]) == 3,
+        f"a={ra['rank_num'] if ra else None} b={rb['rank_num'] if rb else None} c={rc['rank_num'] if rc else None}",
+    )
+    check(
+        "rank vote totals 5/5/3",
+        ra and rb and rc and int(ra["total_votes"]) == 5 and int(rb["total_votes"]) == 5 and int(rc["total_votes"]) == 3,
+        f"{ra['total_votes'] if ra else None}/{rb['total_votes'] if rb else None}/{rc['total_votes'] if rc else None}",
+    )
+
+    # ── Leaderboard page service ──
+    board = await get_leaderboard_page(gid, page=1)
+    check("leaderboard page total=3", board["total_participants"] == 3, str(board))
+    check("leaderboard total_pages=1", board["total_pages"] == 1, str(board))
+    check("leaderboard row count", len(board["rows"]) == 3, str(len(board["rows"])))
+    check(
+        "leaderboard sorted desc",
+        [int(r["total_votes"]) for r in board["rows"]] == [5, 5, 3],
+        str([int(r["total_votes"]) for r in board["rows"]]),
+    )
+    check("leaderboard page out of range clamps", (await get_leaderboard_page(gid, page=99))["page"] == 1)
+
+    # ── get_user_participant + rank_info ──
+    part = await get_user_participant(gid, 5001)
+    check("get_user_participant by user_id", part is not None and part["participant_name"] == "RankA", str(part))
+    info = await get_user_rank_info(gid, part["id"])
+    check("mystatus rank_info votes=5 rank=1", info["votes"] == 5 and info["rank"] == 1, str(info))
+    missing = await get_user_participant(gid, 999999)
+    check("unregistered user → None", missing is None, str(missing))
+
+    # ── Text builders use premium E.* + HTML-safe ──
+    g = await db.get_giveaway(gid)
+    status_html = _status_registered_text(g, part, info)
+    check("mystatus uses tg-emoji", "<tg-emoji" in status_html and "ParseMode" not in status_html)
+    check("mystatus shows rank #1", "#1" in status_html, status_html[:80])
+    lb_html = _leaderboard_text(g, board)
+    check("leaderboard uses tg-emoji", "<tg-emoji" in lb_html)
+    check("leaderboard shows Participant names", "RankA" in lb_html and "RankC" in lb_html)
+
+    # ── Keyboards: plain BE only, no tg-emoji in button labels ──
+    for name, kb in (
+        ("mystatus kb", mystatus_keyboard()),
+        ("lb kb", leaderboard_keyboard(gid, 1, 1)),
+        ("mylink kb (no url)", mylink_keyboard(None)),
+        ("mylink kb (url)", mylink_keyboard("https://t.me/x/1")),
+    ):
+        labels = [b.text for row in kb.inline_keyboard for b in row]
+        check(
+            f"{name} no tg-emoji",
+            all("<tg-emoji" not in (t or "") for t in labels),
+            str(labels),
+        )
+        check(
+            f"{name} no E.* HTML remnants",
+            all("emoji-id=" not in (t or "") for t in labels),
+            str(labels),
+        )
+
+    # ── mylink keyboard with URL includes Vote for Me ──
+    kb_url = mylink_keyboard("https://t.me/ZynexOfficial/55")
+    urls = [b.url for row in kb_url.inline_keyboard for b in row if b.url]
+    check("mylink Vote for Me url present", urls == ["https://t.me/ZynexOfficial/55"], str(urls))
+    kb_nourl = mylink_keyboard(None)
+    urls2 = [b.url for row in kb_nourl.inline_keyboard for b in row if b.url]
+    check("mylink no broken url button", urls2 == [], str(urls2))
+
+    # ── Stale popup text is emoji-free (policy) ──
+    check("stale popup no emoji", not _plain_emoji_in(STALE_LEADERBOARD), STALE_LEADERBOARD)
+
+    # ── generate_participant_message_link via FakeBot ──
+    class LinkBot:
+        def __init__(self, username="ZynexOfficial"):
+            self._u = username
+
+        async def get_chat(self, chat_id):
+            class C:
+                pass
+
+            c = C()
+            c.username = self._u
+            return c
+
+    await db.set_vote_channel_message(pa, 777)
+    fresh = await db.get_vote_participant_by_id(pa)
+    link = await generate_participant_message_link(LinkBot(), fresh)
+    check(
+        "generate_participant_message_link public",
+        link == "https://t.me/ZynexOfficial/777",
+        str(link),
+    )
+    # No channel message → None
+    no_msg_part = await db.get_vote_participant_by_id(pc)
+    link_none = await generate_participant_message_link(LinkBot(), no_msg_part)
+    check("generate link without message → None", link_none is None, str(link_none))
+
+
 async def test_source_policy():
     print("\n== source policy scan ==")
     handlers = ROOT / "handlers"
@@ -515,6 +665,7 @@ async def main():
         await run_keyboard_tests()
         await test_engines()
         await test_db_and_vote_flow()
+        await test_participant_commands()
         await test_source_policy()
         await test_live_api_smoke()
     except Exception:

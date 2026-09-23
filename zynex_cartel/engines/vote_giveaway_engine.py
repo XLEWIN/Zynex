@@ -5,6 +5,8 @@ Complete vote giveaway system: registration, voting, anti-cheat, membership moni
 
 import logging
 import html
+from typing import Optional
+
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode, ChatMemberStatus
 from telegram.error import TelegramError
@@ -30,6 +32,12 @@ from database import (
     admin_remove_votes,
     get_participant_by_user_id,
     utcnow,
+    # Participant command services
+    count_vote_participants,
+    get_vote_leaderboard_page,
+    get_participant_rank,
+    get_leaderboard_total_pages,
+    LEADERBOARD_PAGE_SIZE,
 )
 
 logger = logging.getLogger("zynex.vote_engine")
@@ -489,3 +497,85 @@ async def select_vote_winners(giveaway_id: int, winner_count: int) -> list[dict]
         prev_votes = entry["total_votes"]
 
     return winners
+
+
+# ─── Participant Command Services ─────────────────────────────────
+# Shared by /mystatus, /leaderboard, /mylink — always scoped to active giveaway.
+
+async def get_user_participant(giveaway_id: int, telegram_user_id: int) -> Optional[dict]:
+    """Resolve current giveaway participant by Telegram user ID only."""
+    return await get_vote_participant_by_user(giveaway_id, telegram_user_id)
+
+
+async def get_user_rank_info(giveaway_id: int, participant_id: int) -> dict:
+    """Fresh competition rank + vote total for a participant."""
+    votes = await get_vote_total(participant_id)
+    rank_row = await get_participant_rank(giveaway_id, participant_id)
+    rank = int(rank_row["rank_num"]) if rank_row and rank_row["rank_num"] is not None else 1
+    return {"votes": votes, "rank": rank, "total_votes": votes}
+
+
+async def get_leaderboard_page(giveaway_id: int, page: int = 1) -> dict:
+    """Paginated leaderboard page with page metadata (fresh DB query)."""
+    page_size = LEADERBOARD_PAGE_SIZE
+    total_pages = await get_leaderboard_total_pages(giveaway_id, page_size)
+    page = max(1, min(page, total_pages))
+    rows = await get_vote_leaderboard_page(giveaway_id, page, page_size)
+    total = await count_vote_participants(giveaway_id)
+    return {
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "total_participants": total,
+        "rows": rows,
+    }
+
+
+def build_participant_message_link(
+    channel_id: int,
+    message_id: Optional[int],
+    channel_username: Optional[str] = None,
+) -> Optional[str]:
+    """Direct link to a participant's channel voting message.
+
+    Public channel:  https://t.me/{username}/{message_id}
+    Private channel: https://t.me/c/{internal_id}/{message_id}  (members only)
+    Returns None if no usable link can be built.
+    """
+    if not message_id:
+        return None
+    if channel_username:
+        uname = channel_username.lstrip("@")
+        if uname:
+            return f"https://t.me/{uname}/{message_id}"
+    if channel_id is not None:
+        sid = str(channel_id)
+        # Telegram private chat form: -100<id> → t.me/c/<id>/<msg>
+        if sid.startswith("-100"):
+            return f"https://t.me/c/{sid[4:]}/{message_id}"
+        if sid.startswith("-"):
+            return f"https://t.me/c/{sid.lstrip('-')}/{message_id}"
+    return None
+
+
+async def generate_participant_message_link(bot: Bot, participant: dict) -> Optional[str]:
+    """Resolve channel username via API, then build the participant message URL."""
+    msg_id = None
+    if participant:
+        try:
+            msg_id = participant["channel_message_id"]
+        except (KeyError, IndexError, TypeError):
+            msg_id = None
+    if not msg_id:
+        return None
+
+    username = None
+    try:
+        chat = await bot.get_chat(GIVEAWAY_CHANNEL_ID)
+        username = getattr(chat, "username", None)
+    except TelegramError as e:
+        logger.warning(f"get_chat for channel link failed: {e}")
+
+    return build_participant_message_link(
+        GIVEAWAY_CHANNEL_ID, msg_id, channel_username=username,
+    )

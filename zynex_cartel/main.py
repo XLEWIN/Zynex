@@ -128,6 +128,7 @@ def main():
     from handlers.sgive import register_sgive_handlers
     from handlers.admin import register_admin_handlers, set_bot
     from handlers.vote_giveaway import register_vote_giveaway_handlers
+    from handlers.participant import register_participant_handlers
     from handlers.callbacks import CallbackManager
     from handlers.group import GroupMessageHandler
 
@@ -140,6 +141,7 @@ def main():
     register_sgive_handlers(app)
     register_admin_handlers(app)
     register_vote_giveaway_handlers(app)
+    register_participant_handlers(app)
 
     # Callback manager
     callback_manager = CallbackManager(app.bot)

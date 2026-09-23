@@ -199,6 +199,19 @@ CREATE TABLE IF NOT EXISTS vote_admin_logs (
 async def init_db():
     db = await get_db()
     await db.executescript(SCHEMA_SQL)
+    # Indexes for participant commands (rank / page / user lookup)
+    await db.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_vote_participants_giveaway
+            ON vote_participants(giveaway_id);
+        CREATE INDEX IF NOT EXISTS idx_vote_participants_user
+            ON vote_participants(giveaway_id, telegram_user_id);
+        CREATE INDEX IF NOT EXISTS idx_vote_votes_participant
+            ON vote_votes(participant_id, status);
+        CREATE INDEX IF NOT EXISTS idx_vote_votes_giveaway
+            ON vote_votes(giveaway_id, status);
+        """
+    )
     await db.commit()
     logger.info("Database initialized successfully.")
 
@@ -1013,3 +1026,82 @@ async def get_participant_by_user_id(giveaway_id: int, telegram_user_id: int) ->
         (giveaway_id, telegram_user_id),
     )
     return await cursor.fetchone()
+
+
+# ─── Leaderboard / Rank (participant commands) ────────────────────
+# Competition ranking: same vote total = same rank; next rank skips
+# (1, 1, 3). Deterministic tie-break for display order: earliest id.
+
+LEADERBOARD_PAGE_SIZE = 10
+
+_VOTE_RANKED_CTE = """
+WITH ranked AS (
+    SELECT
+        p.id,
+        p.participant_name,
+        p.telegram_user_id,
+        p.channel_message_id,
+        COUNT(v.id) AS total_votes,
+        RANK() OVER (ORDER BY COUNT(v.id) DESC) AS rank_num
+    FROM vote_participants p
+    LEFT JOIN vote_votes v
+        ON v.participant_id = p.id AND v.status = 'active'
+    WHERE p.giveaway_id = ? AND p.revoked = 0
+    GROUP BY p.id
+)
+"""
+
+
+async def count_vote_participants(giveaway_id: int) -> int:
+    """Active (non-revoked) participant count for a vote giveaway."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT COUNT(*) FROM vote_participants WHERE giveaway_id = ? AND revoked = 0",
+        (giveaway_id,),
+    )
+    row = await cursor.fetchone()
+    return row[0] if row else 0
+
+
+async def get_vote_leaderboard_page(
+    giveaway_id: int, page: int = 1, page_size: int = LEADERBOARD_PAGE_SIZE,
+) -> list:
+    """One page of competition-ranked leaderboard (fresh SQL, not cached)."""
+    page = max(1, page)
+    offset = (page - 1) * page_size
+    db = await get_db()
+    cursor = await db.execute(
+        _VOTE_RANKED_CTE
+        + """
+        SELECT id, participant_name, telegram_user_id, channel_message_id,
+               total_votes, rank_num
+        FROM ranked
+        ORDER BY total_votes DESC, id ASC
+        LIMIT ? OFFSET ?
+        """,
+        (giveaway_id, page_size, offset),
+    )
+    return await cursor.fetchall()
+
+
+async def get_participant_rank(giveaway_id: int, participant_id: int) -> Optional[dict]:
+    """Competition rank + vote total for one participant in the giveaway."""
+    db = await get_db()
+    cursor = await db.execute(
+        _VOTE_RANKED_CTE
+        + """
+        SELECT id, participant_name, total_votes, rank_num
+        FROM ranked WHERE id = ?
+        """,
+        (giveaway_id, participant_id),
+    )
+    return await cursor.fetchone()
+
+
+async def get_leaderboard_total_pages(
+    giveaway_id: int, page_size: int = LEADERBOARD_PAGE_SIZE,
+) -> int:
+    total = await count_vote_participants(giveaway_id)
+    if total <= 0:
+        return 1
+    return (total + page_size - 1) // page_size

@@ -582,6 +582,55 @@ async def test_participant_commands():
     check("generate link without message → None", link_none is None, str(link_none))
 
 
+async def test_restart_helpers():
+    print("\n== restart / git watch helpers ==")
+    from utils import process_restart as pr
+
+    # arm once
+    pr.reset_restart_arm()
+    check("arm_restart first call", pr.arm_restart("test") is True)
+    check("arm_restart second call blocked", pr.arm_restart("test2") is False)
+    check("is_restart_armed", pr.is_restart_armed() is True)
+    pr.reset_restart_arm()
+    check("reset_restart_arm clears", pr.is_restart_armed() is False)
+
+    # argv builder
+    argv = pr.build_restart_argv(["zynex_cartel/main.py"])
+    check(
+        "build_restart_argv uses sys.executable",
+        argv[0] == sys.executable and argv[1] == "zynex_cartel/main.py",
+        str(argv),
+    )
+    argv_default = pr.build_restart_argv([])
+    check("build_restart_argv empty falls back", len(argv_default) >= 2, str(argv_default))
+
+    # git head in this repo
+    head = pr.get_git_head()
+    check(
+        "get_git_head returns 40-char sha or None",
+        head is None or (isinstance(head, str) and len(head) == 40 and all(c in "0123456789abcdef" for c in head.lower())),
+        str(head),
+    )
+
+    # owner-only /restart registration present
+    src = (ROOT / "handlers" / "admin.py").read_text(encoding="utf-8")
+    check("admin.py defines restart_command", "async def restart_command" in src)
+    check("admin.py registers /restart", 'CommandHandler("restart"' in src)
+    check("restart uses owner_only", "@owner_only" in src and "restart_command" in src)
+
+    main_src = (ROOT / "main.py").read_text(encoding="utf-8")
+    check("main.py starts git watcher", "_git_watch_loop" in main_src and "schedule_restart" in main_src)
+    check("main.py cancels git watcher", "git_watch_task" in main_src)
+
+    pr_src = (ROOT / "utils" / "process_restart.py").read_text(encoding="utf-8")
+    check("process_restart has execv path", "os.execv" in pr_src)
+    check("process_restart has Windows spawn fallback", "subprocess.Popen" in pr_src)
+
+    # adminhelp mentions /restart
+    help_src = (ROOT / "handlers" / "start.py").read_text(encoding="utf-8")
+    check("adminhelp lists /restart", "/restart" in help_src)
+
+
 async def test_source_policy():
     print("\n== source policy scan ==")
     handlers = ROOT / "handlers"
@@ -666,6 +715,7 @@ async def main():
         await test_engines()
         await test_db_and_vote_flow()
         await test_participant_commands()
+        await test_restart_helpers()
         await test_source_policy()
         await test_live_api_smoke()
     except Exception:

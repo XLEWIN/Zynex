@@ -1,6 +1,6 @@
 """
 ZYNEX CARTEL — Admin Commands Handler
-/end, /winner, /add, /remove, /ban, /unban, /addsudo
+/end, /winner, /add, /remove, /ban, /unban, /addsudo, /restart
 """
 
 import logging
@@ -17,11 +17,12 @@ from database import (
     get_all_participants, clear_admin_winner_overrides
 )
 from utils import E, mention_user, user_display
-from utils.permissions import sudo_only, is_admin, is_owner
+from utils.permissions import sudo_only, is_admin, is_owner, owner_only
 from utils.announcements import AnnouncementManager
 from engines.vote_engine import VoteGiveawayEngine
 from engines.random_engine import RandomGiveawayEngine
 from engines.slot_engine import SlotGiveawayEngine
+from utils.process_restart import schedule_restart
 from telegram import Bot
 
 logger = logging.getLogger("zynex.handlers.admin")
@@ -457,6 +458,22 @@ async def select_giveaway_command(update: Update, context: ContextTypes.DEFAULT_
     )
 
 
+@owner_only
+async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner only: restart the bot process in the terminal / Railway."""
+    if not update.message:
+        return
+
+    await update.message.reply_text(
+        f"{E.LIGHTNING} <b>Restarting bot…</b>\n\n"
+        "The process will exit and come back up in a moment.",
+        parse_mode=ParseMode.HTML,
+    )
+    logger.info("Owner /restart requested by %s", update.effective_user.id)
+    # Let Telegram flush the reply before the process is replaced
+    schedule_restart("owner /restart", delay=1.5)
+
+
 # Handler registration
 def register_admin_handlers(app):
     app.add_handler(CommandHandler("end", end_command))
@@ -468,3 +485,4 @@ def register_admin_handlers(app):
     app.add_handler(CommandHandler("addsudo", addsudo_command))
     app.add_handler(CommandHandler("removesudo", removesudo_command))
     app.add_handler(CommandHandler("select", select_giveaway_command))
+    app.add_handler(CommandHandler("restart", restart_command))

@@ -86,6 +86,51 @@ async def post_init(app: Application):
     app.bot_data["reconcile_task"] = reconcile_task
     logger.info("Vote reconciliation loop started (every 5 min).")
 
+    # Auto-restart when git HEAD changes (local terminal after commit/push)
+    from utils.process_restart import (
+        get_git_head, schedule_restart, GIT_AUTORESTART,
+    )
+
+    baseline_head = get_git_head()
+    if baseline_head:
+        logger.info("Git HEAD baseline: %s", baseline_head[:12])
+    else:
+        logger.info("Git HEAD unavailable — auto-restart on push disabled for this run.")
+
+    async def _git_watch_loop(interval: float = 20.0):
+        """Poll git HEAD; restart once when the commit changes while running."""
+        last = baseline_head
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                if not GIT_AUTORESTART:
+                    continue
+                current = get_git_head()
+                if not current or not last:
+                    # First successful read establishes baseline
+                    if current and not last:
+                        last = current
+                    continue
+                if current != last:
+                    logger.info(
+                        "Git change detected (%s → %s) — restarting bot…",
+                        last[:12], current[:12],
+                    )
+                    schedule_restart("git HEAD changed", delay=2.0)
+                    return
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"Git watch error: {e}")
+                await asyncio.sleep(60)
+
+    if baseline_head:
+        git_task = asyncio.create_task(_git_watch_loop())
+        app.bot_data["git_watch_task"] = git_task
+        logger.info("Git auto-restart watcher started (every 20s).")
+    else:
+        app.bot_data["git_watch_task"] = None
+
 
 async def post_shutdown(app: Application):
     """Called when the application is shutting down."""
@@ -96,6 +141,11 @@ async def post_shutdown(app: Application):
     if reconcile_task:
         reconcile_task.cancel()
         logger.info("Vote reconciliation stopped.")
+
+    git_task = app.bot_data.get("git_watch_task")
+    if git_task:
+        git_task.cancel()
+        logger.info("Git auto-restart watcher stopped.")
 
     # Stop scheduler
     scheduler = app.bot_data.get("scheduler")

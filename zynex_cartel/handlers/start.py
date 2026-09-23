@@ -237,6 +237,9 @@ async def adminhelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>Access Control:</b>\n"
         f"/addsudo [userid] — Add sudo user\n"
         f"\n"
+        f"<b>Process:</b>\n"
+        f"/restart — Owner only: restart bot in terminal/Railway\n"
+        f"\n"
         f"<b>ZYNEX CARTEL</b> {E.CROWN}"
     )
 

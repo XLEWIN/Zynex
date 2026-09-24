@@ -15,11 +15,114 @@ from utils.keyboards import start_keyboard, verified_keyboard, main_menu_keyboar
 
 logger = logging.getLogger("zynex.handlers.start")
 
-# Mandatory channels config — owner can modify
+# Mandatory channels — CHANNEL ONLY for voting (group not required)
 MANDATORY_CH = [
-    {"id": GIVEAWAY_GROUP_ID, "name": "Zynex Cartel Group", "url": f"https://t.me/c/{str(GIVEAWAY_GROUP_ID).replace('-100', '')}"},
     {"id": GIVEAWAY_CHANNEL_ID, "name": "Zynex Cartel Channel", "url": f"https://t.me/c/{str(GIVEAWAY_CHANNEL_ID).replace('-100', '')}"},
 ]
+
+
+# ─── Help texts (shared by /help button + /help + /adminhelp) ────
+
+def user_help_text() -> str:
+    """Full user help — how to join and enter each giveaway type."""
+    return (
+        f"{E.INFO} <b>ZYNEX CARTEL — Help</b>\n"
+        f"\n"
+        f"{E.CROWN} <b>1. How to join</b>\n"
+        f"• Open a private chat with this bot\n"
+        f"• Send <code>/start</code>\n"
+        f"• Join the required channel, then tap "
+        f"<b>I've Joined</b>\n"
+        f"• Wait for <b>Verification Successful</b>\n"
+        f"\n"
+        f"{E.GIFT} <b>2. Find a giveaway</b>\n"
+        f"• <code>/active</code> — list live giveaways\n"
+        f"• Watch the giveaway group for announcements\n"
+        f"\n"
+        f"{E.VOTE} <b>3. Enter — by type</b>\n"
+        f"\n"
+        f"<b>Vote giveaway</b> (DM only):\n"
+        f"1. <code>/join [name]</code> — register your entry (max 10 chars)\n"
+        f"2. Your post is created in the channel\n"
+        f"3. Others press <b>Vote</b> on your post\n"
+        f"4. Track yourself:\n"
+        f"   • <code>/mystatus</code> — votes &amp; rank\n"
+        f"   • <code>/leaderboard</code> — standings\n"
+        f"   • <code>/mylink</code> — share your voting post\n"
+        f"5. <code>/revoke</code> — leave (keeps existing votes)\n"
+        f"\n"
+        f"<b>Random giveaway:</b>\n"
+        f"• Send any message in the giveaway group while it is live\n"
+        f"\n"
+        f"<b>Slot giveaway:</b>\n"
+        f"• Send <code>🎰</code> (or the slot result) in the group\n"
+        f"• Match <b>7 7 7</b> to win\n"
+        f"\n"
+        f"{E.SHIELD} <b>Rules</b>\n"
+        f"• Stay in the required channel or votes may be removed\n"
+        f"• One vote per user per giveaway\n"
+        f"• Leaving and rejoining only re-votes for the same entry\n"
+        f"\n"
+        f"{E.INFO} <b>Commands</b>\n"
+        f"<code>/start</code> — verify &amp; open menu\n"
+        f"<code>/help</code> — this guide\n"
+        f"<code>/active</code> — active giveaways\n"
+        f"<code>/join [name]</code> — enter vote giveaway\n"
+        f"<code>/revoke</code> — leave vote giveaway\n"
+        f"<code>/mystatus</code> — your status &amp; rank\n"
+        f"<code>/leaderboard</code> — vote rankings\n"
+        f"<code>/mylink</code> — your channel voting link\n"
+        f"\n"
+        f"<b>ZYNEX CARTEL</b> {E.CROWN}"
+    )
+
+
+def admin_help_text() -> str:
+    """Admin guide — how to create, run, and finish a giveaway."""
+    return (
+        f"{E.SHIELD} <b>ZYNEX CARTEL — Admin Guide</b>\n"
+        f"\n"
+        f"{E.GIVEAWAY} <b>Create a giveaway</b> (DM the bot)\n"
+        f"1. <code>/sgive 1</code> — Vote\n"
+        f"   <code>/sgive 2</code> — Random\n"
+        f"   <code>/sgive 3</code> — Slot\n"
+        f"2. Enter <b>name</b>\n"
+        f"3. Enter <b>winner count</b>\n"
+        f"4. Enter <b>start – end</b> times (IST)\n"
+        f"   Example: <code>24/09/2026 18:00 - 20:00</code>\n"
+        f"5. Tap <b>Confirm</b>\n"
+        f"→ Auto-announces when it starts; auto-ends at finish\n"
+        f"\n"
+        f"{E.TROPHY} <b>Run &amp; finish</b>\n"
+        f"<code>/active</code> — see what is live\n"
+        f"<code>/select [id]</code> — target a giveaway (DM)\n"
+        f"<code>/end</code> — end now &amp; pick winners\n"
+        f"<code>/winner [userid]</code> — force a winner\n"
+        f"<code>/cancel</code> — abort the /sgive wizard\n"
+        f"\n"
+        f"{E.VOTE} <b>Vote giveaway tools</b>\n"
+        f"<code>/register [name]</code> — owner: add an entry\n"
+        f"<code>/addvote [userid] [n]</code> — add votes\n"
+        f"<code>/rmvote [userid] [n]</code> — remove votes\n"
+        f"\n"
+        f"{E.USERS} <b>Participants</b>\n"
+        f"<code>/add [userid]</code> — add to giveaway\n"
+        f"<code>/remove [userid]</code> — remove entry\n"
+        f"<code>/ban [userid]</code> / <code>/unban [userid]</code>\n"
+        f"\n"
+        f"{E.LOCK} <b>Access &amp; process</b>\n"
+        f"<code>/addsudo [userid]</code> / <code>/removesudo [userid]</code>\n"
+        f"<code>/restart</code> — owner: restart bot process\n"
+        f"<code>/adminhelp</code> — this guide\n"
+        f"\n"
+        f"{E.INFO} <b>Tips</b>\n"
+        f"• Use Vote when members should campaign for entries\n"
+        f"• Random = any group message while live\n"
+        f"• Slot = send 🎰; triple 7 wins\n"
+        f"• Winners are announced in the group + channel\n"
+        f"\n"
+        f"<b>ZYNEX CARTEL</b> {E.CROWN}"
+    )
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,13 +152,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
             f"{E.CROWN} <b>Welcome to ZYNEX CARTEL!</b>\n"
             f"\n"
-            f"{E.SHIELD} You must join the following channels to participate:\n"
+            f"{E.SHIELD} You must join the following channel to participate:\n"
         )
         for ch in MANDATORY_CH:
             text += f"\n{E.GROUP} <b>{ch['name']}</b>"
 
         text += (
-            f"\n\n{E.LOCK} Join all channels and press the button below."
+            f"\n\n{E.LOCK} Join the channel and press the button below."
         )
 
         keyboard = start_keyboard(MANDATORY_CH)
@@ -90,8 +193,8 @@ async def verify_membership_callback(update: Update, context: ContextTypes.DEFAU
         text = (
             f"{E.WARNING} <b>Verification Failed</b>\n"
             f"\n"
-            f"You haven't joined all required channels yet.\n"
-            f"Please join all channels and try again."
+            f"You haven't joined the required channel yet.\n"
+            f"Please join the channel and try again."
         )
         await query.edit_message_text(
             text=text,
@@ -120,29 +223,9 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    text = (
-        f"{E.INFO} <b>ZYNEX CARTEL — Help</b>\n"
-        f"\n"
-        f"<b>User Commands:</b>\n"
-        f"/start — Start the bot\n"
-        f"/active — View active giveaways\n"
-        f"/mystatus — Your vote status & rank\n"
-        f"/leaderboard — Vote leaderboard (paginated)\n"
-        f"/mylink — Direct link to your channel post\n"
-        f"/join [name] — Register for the vote giveaway\n"
-        f"/revoke — Leave the current vote giveaway\n"
-        f"\n"
-        f"<b>How to Participate:</b>\n"
-        f"{E.GIVEAWAY} <b>Random:</b> Send any message in the giveaway group\n"
-        f"{E.SLOT} <b>Slot:</b> Send the slot machine emoji in the giveaway group\n"
-        f"{E.VOTE} <b>Vote:</b> Use the vote buttons\n"
-        f"\n"
-        f"<b>ZYNEX CARTEL</b> {E.CROWN}"
-    )
-
     from utils.keyboards import main_menu_keyboard
     await query.edit_message_text(
-        text=text,
+        text=user_help_text(),
         parse_mode=ParseMode.HTML,
         reply_markup=main_menu_keyboard(),
     )
@@ -220,31 +303,8 @@ async def adminhelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(user_id):
         return  # Silently ignore
 
-    text = (
-        f"{E.SHIELD} <b>ZYNEX CARTEL — Admin Commands</b>\n"
-        f"\n"
-        f"<b>Giveaway Management:</b>\n"
-        f"/sgive [1/2/3] — Create giveaway (1=Vote, 2=Random, 3=Slot)\n"
-        f"/end — End active giveaway\n"
-        f"/winner [userid] — Override winner selection\n"
-        f"\n"
-        f"<b>Participant Management:</b>\n"
-        f"/add [userid] — Add participant manually\n"
-        f"/remove [userid] — Remove participant\n"
-        f"/ban [userid] — Ban user from giveaways\n"
-        f"/unban [userid] — Unban user\n"
-        f"\n"
-        f"<b>Access Control:</b>\n"
-        f"/addsudo [userid] — Add sudo user\n"
-        f"\n"
-        f"<b>Process:</b>\n"
-        f"/restart — Owner only: restart bot in terminal/Railway\n"
-        f"\n"
-        f"<b>ZYNEX CARTEL</b> {E.CROWN}"
-    )
-
     await update.message.reply_text(
-        text=text,
+        text=admin_help_text(),
         parse_mode=ParseMode.HTML,
     )
 
@@ -255,27 +315,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     from utils.keyboards import main_menu_keyboard
 
-    text = (
-        f"{E.INFO} <b>ZYNEX CARTEL — Help</b>\n"
-        f"\n"
-        f"<b>User Commands:</b>\n"
-        f"/start — Start the bot\n"
-        f"/active — View active giveaways\n"
-        f"/mystatus — Your vote status & rank\n"
-        f"/leaderboard — Vote leaderboard (paginated)\n"
-        f"/mylink — Direct link to your channel post\n"
-        f"/join [name] — Register for the vote giveaway\n"
-        f"/revoke — Leave the current vote giveaway\n"
-        f"\n"
-        f"<b>How to Participate:</b>\n"
-        f"{E.GIVEAWAY} <b>Random:</b> Send any message in the giveaway group\n"
-        f"{E.SLOT} <b>Slot:</b> Send the slot machine emoji in the giveaway group\n"
-        f"{E.VOTE} <b>Vote:</b> Use the vote buttons\n"
-        f"\n"
-        f"<b>ZYNEX CARTEL</b> {E.CROWN}"
-    )
     await update.message.reply_text(
-        text=text,
+        text=user_help_text(),
         parse_mode=ParseMode.HTML,
         reply_markup=main_menu_keyboard(),
     )

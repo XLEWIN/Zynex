@@ -71,7 +71,8 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Argument check
     if not context.args:
         await message.reply_text(
-            f"{E.CROSS} Usage: <code>/join [participant_name]</code>",
+            f"{E.CROSS} Usage: <code>/join [participant_name]</code>\n"
+            f"{E.INFO} Name max: <b>10</b> characters.",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -178,7 +179,8 @@ async def register_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await message.reply_text(
-            f"{E.CROSS} Usage: <code>/register [participant_name]</code>",
+            f"{E.CROSS} Usage: <code>/register [participant_name]</code>\n"
+            f"{E.INFO} Name max: <b>10</b> characters.",
             parse_mode=ParseMode.HTML,
         )
         return

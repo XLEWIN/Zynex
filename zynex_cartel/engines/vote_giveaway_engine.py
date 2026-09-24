@@ -11,7 +11,12 @@ from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode, ChatMemberStatus
 from telegram.error import TelegramError
 
-from config import GIVEAWAY_CHANNEL_ID, GIVEAWAY_GROUP_ID
+from config import (
+    GIVEAWAY_CHANNEL_ID,
+    GIVEAWAY_GROUP_ID,
+    LOG_CHANNEL_ID,
+    MAX_PARTICIPANT_NAME_LEN,
+)
 from database import (
     get_active_vote_giveaway,
     create_vote_participant,
@@ -44,7 +49,7 @@ logger = logging.getLogger("zynex.vote_engine")
 
 # ─── Name Validation ──────────────────────────────────────────────
 
-MAX_NAME_LEN = 32
+MAX_NAME_LEN = MAX_PARTICIPANT_NAME_LEN  # 10 characters max
 
 
 def validate_name(raw: str) -> tuple[bool, str]:
@@ -62,11 +67,12 @@ def validate_name(raw: str) -> tuple[bool, str]:
     return True, name
 
 
-# ─── Membership Checker ───────────────────────────────────────────
+# ─── Membership Checker — CHANNEL only (group not required) ──────
 
 async def check_membership(bot: Bot, user_id: int) -> dict:
-    """Check channel and group membership.
+    """Check channel membership only.
     Returns {channel: bool, group: bool, channel_error: bool, group_error: bool}
+    Group is always True (not required for voting).
     If the API fails (bot lacks permission etc), treat as PASS — we cannot prove non-membership.
     """
     result = {
@@ -74,7 +80,7 @@ async def check_membership(bot: Bot, user_id: int) -> dict:
         "channel_error": False, "group_error": False,
     }
 
-    # Channel check
+    # Channel check (required)
     try:
         member = await bot.get_chat_member(chat_id=GIVEAWAY_CHANNEL_ID, user_id=user_id)
         status = str(member.status).lower()
@@ -86,44 +92,24 @@ async def check_membership(bot: Bot, user_id: int) -> dict:
         result["channel_error"] = True
         result["channel"] = True  # Fail open
 
-    # Group check
-    try:
-        member = await bot.get_chat_member(chat_id=GIVEAWAY_GROUP_ID, user_id=user_id)
-        status = str(member.status).lower()
-        if status in ("left", "banned", "kicked"):
-            result["group"] = False
-    except TelegramError as e:
-        # Cannot verify — do NOT block
-        logger.warning(f"Group membership check failed for {user_id}: {e}")
-        result["group_error"] = True
-        result["group"] = True  # Fail open
+    # Group is NOT required for voting — always pass
+    result["group"] = True
 
     return result
 
 
 def membership_messages(m: dict) -> list[str]:
-    """Build user-facing membership error messages (HTML — premium emojis)."""
+    """Build user-facing membership error messages (HTML — premium emojis).
+    Only the channel is required; group messages are never emitted."""
     from emoji_packs import E
     msgs = []
-    if m["channel_error"]:
+    if m.get("channel_error"):
         msgs.append(f"{E.CROSS} Could not verify channel membership. Please try again later.")
-    elif not m["channel"]:
+    elif not m.get("channel"):
         msgs.append(
             f"{E.CROSS} You must join our channel before joining the giveaway.\n\n"
             "Please join the channel and try again."
         )
-    if m["group_error"]:
-        msgs.append(f"{E.CROSS} Could not verify group membership. Please try again later.")
-    elif not m["group"]:
-        msgs.append(
-            f"{E.CROSS} You must join our group before joining the giveaway.\n\n"
-            "Please join the group and try again."
-        )
-    if not m["channel"] and not m["group"] and not m["channel_error"] and not m["group_error"]:
-        msgs = [
-            f"{E.CROSS} You must join both our channel and group before joining the giveaway.\n\n"
-            "Please join both and try again."
-        ]
     return msgs
 
 
@@ -137,11 +123,66 @@ def build_vote_button(participant_id: int, giveaway_id: int) -> InlineKeyboardMa
     ])
 
 
-def build_channel_message_text(name: str, total_votes: int) -> str:
-    """Format the public voting message."""
-    from emoji_packs import E
+def build_channel_message_text(name: str, total_votes: int, user_id: int = None) -> str:
+    """Format the public voting message.
+    Layout matches requested style:
+      Name: <name>
+      ID: <telegram_user_id>
+      Votes: <count>
+    """
     safe_name = html.escape(name)
-    return f"{E.PERSON} <b>{safe_name}</b> : <code>{total_votes}</code>"
+    lines = [
+        f"Name: <b>{safe_name}</b>",
+    ]
+    if user_id is not None:
+        lines.append(f"ID: <code>{user_id}</code>")
+    lines.append(f"Votes: <code>{total_votes}</code>")
+    return "\n".join(lines)
+
+
+def _row_get(row, key, default=None):
+    """Safe key access for sqlite3.Row or dict."""
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+
+
+async def send_activity_log(bot: Bot, text: str) -> None:
+    """Send a participation/vote log line to the log channel. Fail-soft."""
+    if not LOG_CHANNEL_ID:
+        return
+    try:
+        await bot.send_message(chat_id=LOG_CHANNEL_ID, text=text, parse_mode=ParseMode.HTML)
+    except TelegramError as e:
+        logger.warning(f"Failed to send activity log: {e}")
+
+
+async def log_participation(bot: Bot, participant: dict, giveaway_id: int) -> None:
+    """Log a new participant registration to the log channel."""
+    name = html.escape(str(_row_get(participant, "participant_name", "?")))
+    uid = _row_get(participant, "telegram_user_id") or "—"
+    text = (
+        f"<b>JOIN</b>\n"
+        f"Name: <b>{name}</b>\n"
+        f"ID: <code>{uid}</code>\n"
+        f"Giveaway: <code>#{giveaway_id}</code>"
+    )
+    await send_activity_log(bot, text)
+
+
+async def log_vote(bot: Bot, participant: dict, voter_id: int, total: int) -> None:
+    """Log a cast vote to the log channel."""
+    name = html.escape(str(_row_get(participant, "participant_name", "?")))
+    pid = _row_get(participant, "telegram_user_id") or "—"
+    text = (
+        f"<b>VOTE</b>\n"
+        f"Participant: <b>{name}</b>\n"
+        f"Participant ID: <code>{pid}</code>\n"
+        f"Voter ID: <code>{voter_id}</code>\n"
+        f"Total votes: <code>{total}</code>"
+    )
+    await send_activity_log(bot, text)
 
 
 async def update_channel_message(bot: Bot, participant: dict, giveaway_id: int) -> bool:
@@ -152,7 +193,12 @@ async def update_channel_message(bot: Bot, participant: dict, giveaway_id: int) 
         return False
 
     total = await get_vote_total(pid)
-    text = build_channel_message_text(participant["participant_name"], total)
+    uid = None
+    try:
+        uid = participant["telegram_user_id"]
+    except (KeyError, IndexError, TypeError):
+        uid = None
+    text = build_channel_message_text(participant["participant_name"], total, uid)
 
     try:
         await bot.edit_message_text(
@@ -174,7 +220,12 @@ async def update_channel_message(bot: Bot, participant: dict, giveaway_id: int) 
 async def create_channel_message(bot: Bot, participant: dict, giveaway_id: int) -> bool:
     """Send the initial voting message to the channel."""
     pid = participant["id"]
-    text = build_channel_message_text(participant["participant_name"], 0)
+    uid = None
+    try:
+        uid = participant["telegram_user_id"]
+    except (KeyError, IndexError, TypeError):
+        uid = None
+    text = build_channel_message_text(participant["participant_name"], 0, uid)
     try:
         msg = await bot.send_message(
             chat_id=GIVEAWAY_CHANNEL_ID,
@@ -205,9 +256,10 @@ async def register_participant(
     name = name_or_err
 
     # Membership check (only for self-registration, not owner)
+    # Channel is mandatory; group is NOT required for voting
     if not owner_registered and telegram_user_id:
         m = await check_membership(bot, telegram_user_id)
-        if not m["channel"] or not m["group"]:
+        if not m["channel"]:
             return {"success": False, "errors": membership_messages(m)}
 
     # Already registered check (by Telegram user ID)
@@ -255,6 +307,9 @@ async def register_participant(
     # Send channel message
     msg_ok = await create_channel_message(bot, participant, giveaway_id)
 
+    # Activity log → log channel
+    await log_participation(bot, participant, giveaway_id)
+
     return {
         "success": True,
         "participant": participant,
@@ -277,17 +332,13 @@ async def process_vote(bot: Bot, giveaway_id: int, participant_id: int, voter_id
     if not participant or participant["revoked"] or participant["giveaway_id"] != giveaway_id:
         return {"status": "invalid", "message": "This participant no longer exists."}
 
-    # 3. Membership check (fail open on API errors — cannot prove non-membership)
+    # 3. Membership check — CHANNEL only (group not required)
+    #    Fail open on API errors — cannot prove non-membership
     m = await check_membership(bot, voter_id)
     if not m["channel"]:
         return {
             "status": "no_channel",
             "message": "You must join our channel before voting. Join the channel and press Vote Me again.",
-        }
-    if not m["group"]:
-        return {
-            "status": "no_group",
-            "message": "You must join our group before voting. Join the group and press Vote Me again.",
         }
 
     # 4. Vote history check
@@ -325,6 +376,9 @@ async def process_vote(bot: Bot, giveaway_id: int, participant_id: int, voter_id
     total = await get_vote_total(participant_id)
     await update_channel_message(bot, fresh, giveaway_id)
 
+    # Activity log → log channel
+    await log_vote(bot, fresh, voter_id, total)
+
     return {
         "status": "success",
         "message": "Vote recorded.",
@@ -348,8 +402,9 @@ async def reconcile_votes(bot: Bot, giveaway_id: int) -> list[int]:
             logger.error(f"Reconciliation check failed for {vid}: {e}")
             continue
 
-        # If user left channel OR group → revoke their vote
-        if not m["channel"] or not m["group"]:
+        # If user left the required CHANNEL → revoke their vote
+        # (group leave is ignored — group is not mandatory for voting)
+        if not m["channel"]:
             pid = await revoke_vote_by_voter(giveaway_id, vid)
             if pid and pid not in changed_pids:
                 changed_pids.append(pid)
@@ -382,8 +437,9 @@ async def handle_membership_update(bot: Bot, update) -> list[int]:
         new_status = member_update.new_chat_member.status
         user_id = member_update.new_chat_member.user.id
 
-        # Only care about leaving the required channel or group
-        if chat.id not in (GIVEAWAY_CHANNEL_ID, GIVEAWAY_GROUP_ID):
+        # Only care about leaving the required CHANNEL
+        # (group leave does not revoke votes — group not required)
+        if chat.id != GIVEAWAY_CHANNEL_ID:
             return []
 
         left = new_status in (ChatMemberStatus.LEFT, ChatMemberStatus.BANNED, "left", "kicked")

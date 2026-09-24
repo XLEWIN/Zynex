@@ -266,24 +266,28 @@ async def test_engines():
     check("validate_name ok", ok and name == "Alice", repr(name))
     ok, err = validate_name("")
     check("validate_name empty fails", not ok and "tg-emoji" in err, repr(err))
-    ok, err = validate_name("x" * 33)
-    check("validate_name too long fails", not ok and "tg-emoji" in err, repr(err))
+    ok, err = validate_name("x" * 11)
+    check("validate_name too long fails (11)", not ok and "tg-emoji" in err, repr(err))
+    ok, name10 = validate_name("x" * 10)
+    check("validate_name 10 chars ok", ok and name10 == "x" * 10, repr(name10))
     ok, err = validate_name("bad\x00name")
     check("validate_name control chars fails", not ok, repr(err))
 
-    # membership messages — pure premium, no plain emoji outside tags
+    # membership messages — channel ONLY (group not required)
     m = {"channel": False, "group": True, "channel_error": False, "group_error": False}
     msgs = membership_messages(m)
     check("membership channel msg has E.CROSS", any("tg-emoji" in x for x in msgs) and len(msgs) == 1, str(msgs))
-    m = {"channel": False, "group": False, "channel_error": False, "group_error": False}
+    # group=False is ignored — no group mandate
+    m = {"channel": True, "group": False, "channel_error": False, "group_error": False}
     msgs = membership_messages(m)
-    check("membership both → single combined msg", len(msgs) == 1 and "both" in msgs[0], str(msgs))
+    check("membership ignores group-only fail", len(msgs) == 0, str(msgs))
     m = {"channel": True, "group": True, "channel_error": True, "group_error": False}
     msgs = membership_messages(m)
     check("channel_error message", len(msgs) == 1 and "Could not verify" in msgs[0], str(msgs))
 
-    text = build_channel_message_text("Bob <script>", 5)
-    check("channel msg escapes HTML", "&lt;script&gt;" in text and "tg-emoji" in text, text)
+    text = build_channel_message_text("Bob <script>", 5, 8672112080)
+    check("channel msg Name/ID style", "Name:" in text and "ID:" in text and "8672112080" in text, text)
+    check("channel msg escapes HTML", "&lt;script&gt;" in text, text)
     check("channel msg has code tag", "<code>5</code>" in text, text)
 
     kb = build_vote_button(7, 3)
@@ -626,9 +630,16 @@ async def test_restart_helpers():
     check("process_restart has execv path", "os.execv" in pr_src)
     check("process_restart has Windows spawn fallback", "subprocess.Popen" in pr_src)
 
-    # adminhelp mentions /restart
+    # adminhelp mentions /restart + step-by-step guides
     help_src = (ROOT / "handlers" / "start.py").read_text(encoding="utf-8")
     check("adminhelp lists /restart", "/restart" in help_src)
+    check("user help has join steps", "How to join" in help_src and "/start" in help_src)
+    check("user help has vote steps", "/join [name]" in help_src and "/leaderboard" in help_src)
+    check("user help has random/slot", "Random giveaway" in help_src and "Slot giveaway" in help_src)
+    check("admin help create steps", "Create a giveaway" in help_src and "/sgive 1" in help_src)
+    check("admin help finish steps", "/end" in help_src and "/winner" in help_src)
+    check("help builders shared", "def user_help_text" in help_src and "def admin_help_text" in help_src)
+    check("/help uses user_help_text", "user_help_text()" in help_src)
 
 
 async def test_source_policy():

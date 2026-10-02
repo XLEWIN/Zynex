@@ -633,6 +633,7 @@ async def test_restart_helpers():
     # adminhelp mentions /restart + step-by-step guides
     help_src = (ROOT / "handlers" / "start.py").read_text(encoding="utf-8")
     check("adminhelp lists /restart", "/restart" in help_src)
+    check("adminhelp lists /bd", "/bd" in help_src)
     check("user help has join steps", "How to join" in help_src and "/start" in help_src)
     check("user help has vote steps", "/join [name]" in help_src and "/leaderboard" in help_src)
     check("user help has random/slot", "Random giveaway" in help_src and "Slot giveaway" in help_src)
@@ -640,6 +641,82 @@ async def test_restart_helpers():
     check("admin help finish steps", "/end" in help_src and "/winner" in help_src)
     check("help builders shared", "def user_help_text" in help_src and "def admin_help_text" in help_src)
     check("/help uses user_help_text", "user_help_text()" in help_src)
+
+    # /bd owner broadcast
+    bd_src = (ROOT / "handlers" / "broadcast.py").read_text(encoding="utf-8")
+    check("bd.py defines bd_command", "async def bd_command" in bd_src)
+    check("bd uses owner_only", "@owner_only" in bd_src and "bd_command" in bd_src)
+    check("bd registers CommandHandler", 'CommandHandler("bd"' in bd_src)
+    check("bd requires reply_to_message", "reply_to_message" in bd_src)
+    check("bd sends channel + group", "GIVEAWAY_CHANNEL_ID" in bd_src and "GIVEAWAY_GROUP_ID" in bd_src)
+    check("bd deep link start=join", "start=join" in bd_src)
+    check("bd preserves entities", "entities=source.entities" in bd_src)
+    main_src2 = (ROOT / "main.py").read_text(encoding="utf-8")
+    check("main registers broadcast", "register_broadcast_handlers" in main_src2)
+    check("start handles join payload", "pending_join" in help_src and "join_guide_text" in help_src)
+
+
+async def test_broadcast_helpers():
+    print("\n== /bd broadcast helpers ==")
+    from handlers.broadcast import build_join_url, participate_keyboard, send_broadcast_copy
+
+    url = build_join_url("ZynexBot")
+    check("join url format", url == "https://t.me/ZynexBot?start=join", url)
+    url_at = build_join_url("@ZynexBot")
+    check("join url strips @", url_at == "https://t.me/ZynexBot?start=join", url_at)
+    url_empty = build_join_url("")
+    check("join url empty fallback", url_empty == "https://t.me/", url_empty)
+
+    kb = participate_keyboard("ZynexBot")
+    row = kb.inline_keyboard[0][0]
+    check("participate kb is url button", row.url == "https://t.me/ZynexBot?start=join", str(row.url))
+    check("participate kb text no tg-emoji", "<tg-emoji" not in row.text, row.text)
+
+    # join guide text
+    from handlers.start import join_guide_text
+    none_txt = join_guide_text(None)
+    check("join guide empty state", "No giveaway" in none_txt, none_txt[:80])
+    fake_g = {
+        "name": "TestVote",
+        "type": 1,
+        "status": "ACTIVE",
+        "start_time": "2026-10-03T10:00:00+00:00",
+        "end_time": "2026-10-03T12:00:00+00:00",
+    }
+    g_txt = join_guide_text(fake_g)
+    check("join guide vote how-to", "How to join" in g_txt and "/join [name]" in g_txt, g_txt[:120])
+    check("join guide uses E.* HTML", "<tg-emoji" in g_txt, g_txt[:80])
+
+    # send_broadcast_copy with FakeBot — text + entities preserved
+    class FakeSource:
+        text = "Hello ** world"
+        entities = None
+        caption = None
+        caption_entities = None
+        photo = None
+        video = None
+        animation = None
+        document = None
+
+    fb = FakeBot()
+    ok = await send_broadcast_copy(fb, FakeSource(), -1004484790002, kb)
+    check("broadcast copy text sent", ok and len(fb.sent) == 1, str(len(fb.sent)))
+    check("broadcast copy keeps text", fb.sent[0]["text"] == "Hello ** world", fb.sent[0]["text"])
+    check("broadcast copy attaches kb", fb.sent[0]["reply_markup"] is not None, "")
+
+    class FakeEmpty:
+        text = None
+        entities = None
+        caption = None
+        caption_entities = None
+        photo = None
+        video = None
+        animation = None
+        document = None
+
+    fb2 = FakeBot()
+    ok2 = await send_broadcast_copy(fb2, FakeEmpty(), -1004484790002, kb)
+    check("broadcast empty source → False", ok2 is False, str(ok2))
 
 
 async def test_source_policy():
@@ -727,6 +804,7 @@ async def main():
         await test_db_and_vote_flow()
         await test_participant_commands()
         await test_restart_helpers()
+        await test_broadcast_helpers()
         await test_source_policy()
         await test_live_api_smoke()
     except Exception:

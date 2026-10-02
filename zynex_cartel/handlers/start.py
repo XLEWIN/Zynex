@@ -113,6 +113,8 @@ def admin_help_text() -> str:
         f"{E.LOCK} <b>Access &amp; process</b>\n"
         f"<code>/addsudo [userid]</code> / <code>/removesudo [userid]</code>\n"
         f"<code>/restart</code> — owner: restart bot process\n"
+        f"<code>/bd</code> — owner: reply to a post → broadcast to GC + group "
+        f"with Participate button\n"
         f"<code>/adminhelp</code> — this guide\n"
         f"\n"
         f"{E.INFO} <b>Tips</b>\n"
@@ -125,13 +127,105 @@ def admin_help_text() -> str:
     )
 
 
+# ─── Join deep-link guide (/start join) ───────────────────────────
+
+async def _resolve_join_giveaway() -> dict | None:
+    """Active giveaway first, else the next scheduled one."""
+    from database import get_active_giveaways, get_scheduled_giveaways
+    active = await get_active_giveaways()
+    if active:
+        # Prefer an active vote giveaway, else any active
+        for g in active:
+            try:
+                if g["type"] == 1:
+                    return g
+            except (KeyError, IndexError, TypeError):
+                continue
+        return active[0]
+    scheduled = await get_scheduled_giveaways()
+    return scheduled[0] if scheduled else None
+
+
+def join_guide_text(giveaway: dict | None) -> str:
+    """Instructions shown after the Participate Now deep link."""
+    from utils import giveaway_type_name, giveaway_type_emoji, format_ist, from_utc_iso
+    if not giveaway:
+        return (
+            f"{E.INFO} <b>No giveaway is open right now.</b>\n"
+            f"\n"
+            f"{E.CLOCK} Check back soon — or tap <b>Active Giveaways</b> below.\n"
+            f"\n"
+            f"{E.VOTE} When a <b>Vote</b> giveaway is live: "
+            f"<code>/join [name]</code> in this chat."
+        )
+
+    try:
+        name = giveaway["name"]
+        gtype = giveaway["type"]
+        status = giveaway["status"]
+        end = format_ist(from_utc_iso(giveaway["end_time"]))
+        start = format_ist(from_utc_iso(giveaway["start_time"]))
+    except (KeyError, IndexError, TypeError, Exception):
+        name, gtype, status, start, end = "?", 1, "ACTIVE", "?", "?"
+
+    type_emoji = giveaway_type_emoji(gtype)
+    type_name = giveaway_type_name(gtype)
+
+    if gtype == 1:
+        how = (
+            f"{E.VOTE} <b>How to join</b>\n"
+            f"1. Stay in the required channel\n"
+            f"2. Send <code>/join [name]</code> here "
+            f"(max 10 characters)\n"
+            f"3. Others vote on your channel post\n"
+            f"4. Track: <code>/mystatus</code> · "
+            f"<code>/leaderboard</code> · <code>/mylink</code>"
+        )
+    elif gtype == 2:
+        how = (
+            f"{E.GIVEAWAY} <b>How to join</b>\n"
+            f"Send any message in the giveaway group "
+            f"while the giveaway is live."
+        )
+    else:
+        how = (
+            f"{E.SLOT} <b>How to join</b>\n"
+            f"Send <code>🎰</code> in the giveaway group. "
+            f"Match <b>7 7 7</b> to win."
+        )
+
+    when = (
+        f"{E.CLOCK} Ends: <b>{end}</b>"
+        if status == "ACTIVE"
+        else f"{E.CLOCK} Starts: <b>{start}</b> · Ends: <b>{end}</b>"
+    )
+
+    return (
+        f"{E.PARTY} <b>Join the giveaway</b>\n"
+        f"\n"
+        f"{E.GIFT} <b>{name}</b>\n"
+        f"{type_emoji} Type: <b>{type_name}</b>\n"
+        f"{when}\n"
+        f"\n"
+        f"{how}\n"
+        f"\n"
+        f"{E.SHIELD} Leaving the channel removes your vote."
+    )
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command."""
+    """Handle /start command. Supports deep link: /start join."""
     user = update.effective_user
     if not user:
         return
 
     user_id = user.id
+
+    # Deep-link payload (Participate Now → ?start=join)
+    payload = (context.args[0] if context.args else "").lower()
+    is_join = payload == "join" or payload.startswith("join")
+    if is_join:
+        context.user_data["pending_join"] = True
 
     # Register user
     await upsert_user(
@@ -162,6 +256,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         keyboard = start_keyboard(MANDATORY_CH)
+    elif context.user_data.get("pending_join"):
+        # Participate Now deep link — show join guide for current/scheduled
+        giveaway = await _resolve_join_giveaway()
+        text = join_guide_text(giveaway)
+        keyboard = verified_keyboard()
     else:
         text = (
             f"{E.CROWN} <b>Welcome to ZYNEX CARTEL!</b>\n"
@@ -202,15 +301,19 @@ async def verify_membership_callback(update: Update, context: ContextTypes.DEFAU
             reply_markup=start_keyboard(MANDATORY_CH),
         )
     else:
-        # Verified!
-        text = (
-            f"{E.CHECK} <b>Verification Successful!</b>\n"
-            f"\n"
-            f"{E.SPARKLE} Welcome to ZYNEX CARTEL!\n"
-            f"You now have access to all giveaways.\n"
-            f"\n"
-            f"Choose an option below:"
-        )
+        # Verified! — continue into join guide if deep-linked
+        if context.user_data.get("pending_join"):
+            giveaway = await _resolve_join_giveaway()
+            text = join_guide_text(giveaway)
+        else:
+            text = (
+                f"{E.CHECK} <b>Verification Successful!</b>\n"
+                f"\n"
+                f"{E.SPARKLE} Welcome to ZYNEX CARTEL!\n"
+                f"You now have access to all giveaways.\n"
+                f"\n"
+                f"Choose an option below:"
+            )
         await query.edit_message_text(
             text=text,
             parse_mode=ParseMode.HTML,

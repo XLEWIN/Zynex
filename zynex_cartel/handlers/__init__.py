@@ -9,6 +9,7 @@ from handlers.admin import register_admin_handlers
 from handlers.callbacks import CallbackManager
 from handlers.group import GroupMessageHandler
 from handlers.participant import register_participant_handlers
+from handlers.broadcast import register_broadcast_handlers
 
 __all__ = [
     "register_start_handlers",
@@ -18,4 +19,5 @@ __all__ = [
     "CallbackManager",
     "GroupMessageHandler",
     "register_participant_handlers",
+    "register_broadcast_handlers",
 ]
